@@ -1,3 +1,6 @@
+lab:
+  tuning:
+    f12: false   # F-12: record key = debtor account id (baseline: merchant id)
 spring:
   application:
     name: payment-gateway

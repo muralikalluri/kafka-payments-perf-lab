@@ -2,3 +2,11 @@
 # Baseline anti-patterns live in *-baseline.yml and must not be changed.
 # Profiles are per database: a database migrated by the tuned profile is not reused by baseline
 # (run-benchmark.sh resets volumes before every run).
+
+# F-12: key by debtor account id and use 12 partitions (sizing rationale: docs/adr/0005-partition-sizing.md).
+# Every service sets this because each one's KafkaAdmin creates or grows the shared topics.
+lab:
+  topics:
+    partitions: 12
+  tuning:
+    f12: true

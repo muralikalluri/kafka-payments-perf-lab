@@ -10,6 +10,7 @@ import lab.payments.common.Ids;
 import lab.payments.common.Json;
 import lab.payments.common.PaymentPosted;
 import lab.payments.common.PaymentValidated;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,8 +34,11 @@ public class LedgerService {
     private final JdbcTemplate jdbc;
 
     private final MeterRegistry meters;
+    private final boolean keyByDebtor;
 
-    public LedgerService(JdbcTemplate jdbc, MeterRegistry meters) {
+    public LedgerService(JdbcTemplate jdbc, MeterRegistry meters,
+            @Value("${lab.tuning.f12:false}") boolean keyByDebtor) {
+        this.keyByDebtor = keyByDebtor;
         this.jdbc = jdbc;
         this.meters = meters;
         meters.counter("ledger.parked"); // export 0 from startup so dashboards show a series
@@ -164,9 +168,9 @@ public class LedgerService {
         PaymentPosted posted = new PaymentPosted(PaymentPosted.SCHEMA_VERSION,
                 Ids.eventId(e.paymentId(), "posted"), e.eventId(), e.paymentId(), e.clientId(),
                 e.merchantId(), e.debtorAccountId(), outcome, reason, Instant.now());
-        // F-12: keyed by merchant id in baseline.
+        // F-12: keyed by merchant id in baseline, by debtor account id in tuned.
         jdbc.update("INSERT INTO outbox(msg_key, payload) VALUES (?,?)",
-                e.merchantId(), Json.write(posted));
+                keyByDebtor ? e.debtorAccountId() : e.merchantId(), Json.write(posted));
         meters.counter("ledger.applied", "outcome", outcome.name()).increment();
     }
 

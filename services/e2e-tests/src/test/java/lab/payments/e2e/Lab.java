@@ -10,6 +10,12 @@ import java.util.function.BooleanSupplier;
 import lab.payments.ledgerservice.LedgerServiceApplication;
 import lab.payments.paymentgateway.PaymentGatewayApplication;
 import lab.payments.validationservice.ValidationServiceApplication;
+import java.time.Duration;
+import java.util.List;
+import java.util.Properties;
+import org.apache.kafka.clients.admin.Admin;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.springframework.boot.builder.SpringApplicationBuilder;
@@ -123,6 +129,43 @@ final class Lab {
         } catch (Exception e) {
             throw new IllegalStateException(e);
         }
+    }
+
+    /** Reads a topic from the start and returns the record key of the first record containing the needle. */
+    static String keyOf(String topic, String needle) {
+        Properties props = new Properties();
+        props.put("bootstrap.servers", KAFKA.getBootstrapServers());
+        props.put("group.id", "lab-test-" + UUID.randomUUID());
+        props.put("auto.offset.reset", "earliest");
+        props.put("key.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
+        props.put("value.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
+        try (KafkaConsumer<String, String> consumer = new KafkaConsumer<>(props)) {
+            List<org.apache.kafka.common.TopicPartition> partitions = consumer.partitionsFor(topic).stream()
+                    .map(p -> new org.apache.kafka.common.TopicPartition(topic, p.partition())).toList();
+            consumer.assign(partitions);
+            consumer.seekToBeginning(partitions);
+            long deadline = System.currentTimeMillis() + 30_000;
+            while (System.currentTimeMillis() < deadline) {
+                for (ConsumerRecord<String, String> r : consumer.poll(Duration.ofMillis(500))) {
+                    if (r.value().contains(needle)) {
+                        return r.key();
+                    }
+                }
+            }
+        }
+        throw new AssertionError("no record containing " + needle + " on " + topic);
+    }
+
+    static int partitionCount(String topic) {
+        try (Admin admin = Admin.create(Map.<String, Object>of("bootstrap.servers", KAFKA.getBootstrapServers()))) {
+            return admin.describeTopics(List.of(topic)).allTopicNames().get().get(topic).partitions().size();
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    static boolean tuned() {
+        return "tuned".equals(PROFILE);
     }
 
     static void await(String what, BooleanSupplier condition) {

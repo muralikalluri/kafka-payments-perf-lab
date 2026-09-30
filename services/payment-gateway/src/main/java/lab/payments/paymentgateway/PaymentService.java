@@ -15,6 +15,7 @@ import lab.payments.common.Ids;
 import lab.payments.common.Json;
 import lab.payments.common.PaymentInitiated;
 import lab.payments.common.Topics;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
@@ -28,10 +29,13 @@ public class PaymentService {
     private final JdbcTemplate jdbc;
     private final KafkaTemplate<String, String> kafka;
 
+    private final boolean keyByDebtor;
     private final Counter accepted;
     private final Counter replayed;
 
-    public PaymentService(JdbcTemplate jdbc, KafkaTemplate<String, String> kafka, MeterRegistry meters) {
+    public PaymentService(JdbcTemplate jdbc, KafkaTemplate<String, String> kafka, MeterRegistry meters,
+            @Value("${lab.tuning.f12:false}") boolean keyByDebtor) {
+        this.keyByDebtor = keyByDebtor;
         this.jdbc = jdbc;
         this.kafka = kafka;
         this.accepted = meters.counter("payments.accepted");
@@ -88,8 +92,10 @@ public class PaymentService {
                 req.debtorAccountId(), req.creditorAccountId(), req.merchantId(),
                 req.amountMinor(), req.currency(), seq, Instant.now());
         try {
-            // F-12: record key is the merchant id (hot partition for a large merchant).
-            kafka.send(Topics.INITIATED, req.merchantId(), Json.write(event))
+            // F-12: baseline keys by merchant id (hot partition for a large merchant); tuned keys by
+            // debtor account id, which also keeps one debtor's payments on one partition.
+            String key = keyByDebtor ? req.debtorAccountId() : req.merchantId();
+            kafka.send(Topics.INITIATED, key, Json.write(event))
                     .get(10, TimeUnit.SECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
