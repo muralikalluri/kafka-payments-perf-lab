@@ -132,13 +132,13 @@ Built to the MVP cut in [SPEC.md](SPEC.md) first, then the items SPEC marks Late
 | F-11 hot settlement account | done | lab.tuning.f11 |
 | Three-broker Kafka cluster | done | docker-compose.yml |
 | Soak scenario | done | load/k6/soak.js |
-| Gatling scenarios | not built | load/gatling/ |
+| Gatling scenarios | done | load/gatling/ |
 | Distributed tracing to Jaeger | done | docker-compose.yml |
 | JFR recordings and flame graphs | done | scripts/flamegraph.py |
 | PDF export of the reports | not built | scripts/export_pdf.js |
 | Reusable report template folder | not built | report/template/ |
 
-Not built (marked Later in SPEC.md): Gatling scenarios; PDF export of the reports; Reusable report template folder.
+Not built (marked Later in SPEC.md): PDF export of the reports; Reusable report template folder.
 
 Known gaps in what was built: no load shedding on the gateway outbox backlog; some results predate the per-stage metric snapshots (consumer lag, CPU, garbage collection, connection pools, locks), so those runs have none stored; FX rates are cached in process rather than in Redis; connection-pool sizes are unswept lab choices; the cache accepts bounded staleness (a blocked account can be approved until its cached copy is invalidated or expires).
 

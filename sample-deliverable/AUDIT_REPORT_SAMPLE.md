@@ -310,6 +310,10 @@ quadrantChart
 | `2026-09-30_tuned_steady_extended` | no | 1200 | 1200 | 126 ms | 835 ms | 33.2 s | 0 | no |
 | `2026-09-30_tuned_steady_extended` | no | 1600 | 1481 | 1.7 s | 34.1 s | 59.3 s | 7120 | no |
 
+**Gatling** (the same workload driven by Gatling instead of k6, to show the results do not depend on the load tool):
+
+_(no Gatling runs are recorded)_
+
 **Soak** (a long steady rate; drift would show as a rising p99 across windows or as growth in heap, threads or pool use, but a single soak run is an observation, not proof of the absence of leaks):
 
 _(no soak runs are recorded)_

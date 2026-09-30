@@ -398,6 +398,8 @@ def params_table(runs: dict) -> str:
                     f"after {p['warm_seconds']} s, then {p['recover_seconds']} s recovery")
         elif r.scenario == "soak":
             desc = f"{p['req_per_s']} req/s for {p['minutes']} minutes"
+        elif r.scenario == "gatling":
+            desc = f"Gatling, {p['req_per_s']} req/s for {p['seconds']} s"
         else:
             desc = f"{p['vus']} virtual users for {p['duration_seconds']} s"
         rows.append([run_label(r), desc])
@@ -485,3 +487,17 @@ def profile_tables(runs: dict) -> str:
         out.append(f"**{r.profile}** ({run_label(r)}); flame graphs: " + ", ".join(links) + "\n\n"
                    + table(["Service", "View", "Samples", "Hottest frames (share of samples)"], rows))
     return "\n\n".join(out)
+
+
+def gatling_table(runs: dict) -> str:
+    rows = []
+    for key in sorted(k for k, r in runs.items() if r.scenario == "gatling"):
+        r = runs[key]
+        k = r.result["k6"]
+        e = r.result["pipeline"]["e2e_ms"]
+        rows.append([r.profile, k["http_reqs"], f"{k['http_req_failed_rate'] * 100:.2f}%", ms(k["post_latency_ms"]["p50"]),
+                     ms(k["post_latency_ms"]["p99"]), ms(e["p50"]), ms(e["p99"]), yes_no(r.result["invariants"]["all_hold"])])
+    if not rows:
+        return "_(no Gatling runs are recorded)_"
+    return table(["Profile", "Requests", "HTTP error rate", "POST p50", "POST p99", "End-to-end p50", "End-to-end p99",
+                  "Invariants hold"], rows)

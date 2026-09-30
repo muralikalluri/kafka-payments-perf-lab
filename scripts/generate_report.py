@@ -613,6 +613,7 @@ def build_values(runs: dict) -> dict:
         "fact.kafka_topology": L.kafka_topology(runs),
         "table.failover": L.failover_table(runs),
         "table.soak": L.soak_tables(runs),
+        "table.gatling": L.gatling_table(runs),
         "table.profiles": L.profile_tables(runs),
         "fact.failover_note": failover_note(runs),
         "table.extended_scope": extended_scope_table(runs),

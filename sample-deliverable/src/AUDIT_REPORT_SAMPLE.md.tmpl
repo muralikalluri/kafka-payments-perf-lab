@@ -196,6 +196,10 @@ Impact is assessed on a scale of {{fact.impact_scale}} and effort is S, M or L; 
 
 {{table.extra_runs}}
 
+**Gatling** (the same workload driven by Gatling instead of k6, to show the results do not depend on the load tool):
+
+{{table.gatling}}
+
 **Soak** (a long steady rate; drift would show as a rising p99 across windows or as growth in heap, threads or pool use, but a single soak run is an observation, not proof of the absence of leaks):
 
 {{table.soak}}

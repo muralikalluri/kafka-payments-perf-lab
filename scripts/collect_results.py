@@ -72,6 +72,21 @@ def k6_section(summary):
     }
 
 
+def gatling_section(summary):
+    """Maps Gatling's statistics (numbers arrive as strings) into the same shape as the k6 section."""
+    def n(section, key="total"):
+        return float(summary[section][key])
+
+    total, ko = n("numberOfRequests"), n("numberOfRequests", "ko")
+    return {
+        "http_reqs": int(total), "req_per_s": round_or_none(n("meanNumberOfRequestsPerSecond")),
+        "http_req_failed_rate": (ko / total) if total else 0.0,
+        "post_latency_ms": {"p50": n("percentiles1"), "p95": n("percentiles3"), "p99": n("percentiles4"),
+                            "max": n("maxResponseTime")},
+        "dropped_iterations": 0, "checks_pass_rate": None,
+    }
+
+
 def phase_rows(summary, phases, t0):
     last_index = len(phases) - 1
     """phases: list of (name, target_rate, start_offset_s, duration_s)."""
@@ -163,6 +178,10 @@ def main():
                   "burst_seconds": burst, "recover_seconds": recover}
         phases = [("warm", base, 0, warm), ("burst", base * 10, warm, burst),
                   ("recover", base, warm + burst, recover)]
+    elif a.scenario == "gatling":
+        params = {"req_per_s": int(os.environ.get("GATLING_RATE", "50")), "seconds": int(os.environ.get("GATLING_SECONDS", "60")),
+                  "load_tool": "gatling"}
+        phases = []
     elif a.scenario == "soak":
         rate = int(os.environ["SOAK_RATE"])
         minutes = int(os.environ.get("SOAK_MINUTES", "60"))
@@ -206,7 +225,7 @@ def main():
         "git_dirty": bool(subprocess.run(["git", "status", "--porcelain", "--", ".", ":(exclude)results"],
                                          capture_output=True, text=True).stdout.strip()),
         "params": params,
-        "k6": k6_section(summary),
+        "k6": gatling_section(summary) if a.scenario == "gatling" else k6_section(summary),
         "k6_thresholds_passed": a.k6_exit == 0,
         "pipeline": {
             "payments_created": created, "terminal": terminal, "posted": posted, "rejected": rejected,
@@ -218,7 +237,7 @@ def main():
     }
 
     slo = {"error_rate_under_0_1pct": result["k6"]["http_req_failed_rate"] < SLO_ERROR_RATE}
-    if a.scenario == "smoke":
+    if a.scenario in ("smoke", "gatling"):
         # Stepped and spike runs overload on purpose; they are judged per phase, not overall.
         slo["p99_e2e_under_500ms"] = overall["p99"] is not None and overall["p99"] < SLO_P99_MS
     if a.scenario == "steady":

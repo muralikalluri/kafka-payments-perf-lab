@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Runs one k6 scenario against one profile from a clean state and writes results/<date>_<profile>_<scenario>/.
-# Usage: ./scripts/run-benchmark.sh <baseline|tuned> <smoke|steady|spike|soak>
+# Usage: ./scripts/run-benchmark.sh <baseline|tuned> <smoke|steady|spike|soak|gatling>
 # Scenario knobs (env): STEPS, STEP_SECONDS (steady); BASE_RATE, WARM_SECONDS, BURST_SECONDS,
-# RECOVER_SECONDS (spike); SOAK_RATE, SOAK_MINUTES (soak; the rate defaults to 60% of the profile's steady maximum,
+# RECOVER_SECONDS (spike); GATLING_RATE, GATLING_SECONDS (gatling: the same workload driven by Gatling instead of k6);
+# SOAK_RATE, SOAK_MINUTES (soak; the rate defaults to 60% of the profile's steady maximum,
 # read from its latest steady result). They are recorded in result.json. RUN_SUFFIX appends to the results folder name.
 # BENCH_CHAOS_CMD is an optional shell command run in the background during the load (fault injection).
 # BENCH_JFR=true records each service with Java Flight Recorder and writes flame graphs into the result folder.
@@ -16,11 +17,11 @@ if [ "$(uname)" = Darwin ] && [ -z "${BENCH_CAFFEINATED:-}" ] && command -v caff
   BENCH_CAFFEINATED=1 exec caffeinate -dimsu "$0" "$@"
 fi
 
-usage() { echo "usage: $0 <baseline|tuned> <smoke|steady|spike|soak>" >&2; exit 2; }
+usage() { echo "usage: $0 <baseline|tuned> <smoke|steady|spike|soak|gatling>" >&2; exit 2; }
 PROFILE="${1:-}"; SCENARIO="${2:-}"
 case "$PROFILE" in baseline|tuned) ;; *) usage ;; esac
 case "$SCENARIO" in
-  smoke|steady|spike|soak) ;;
+  smoke|steady|spike|soak|gatling) ;;
   *) usage ;;
 esac
 
@@ -136,6 +137,7 @@ echo "==> environment"
   fi
   echo "jfr=${BENCH_JFR:-false}"
   echo "jvm_opts=${JVM_OPTS:-defaults}"
+  [ "$SCENARIO" = gatling ] && echo "load_tool=gatling rate=${GATLING_RATE:-50} seconds=${GATLING_SECONDS:-60}"
   [ "$SCENARIO" = soak ] && echo "soak_rate=$SOAK_RATE soak_minutes=$SOAK_MINUTES"
   echo "ablation=${BENCH_SERVICE_ENV:-none}"
   echo "kafka_brokers=$($COMPOSE ps --services | grep -c '^kafka-[0-9]')"
@@ -173,8 +175,31 @@ if [ -n "${BENCH_CHAOS_CMD:-}" ]; then
   PIDS="$PIDS $!"
 fi
 set +e
-SUMMARY_PATH="$RUN_DIR/summary.json" k6 run --quiet "load/k6/$SCENARIO.js" 2>&1 | tee "$RUN_DIR/raw/k6.log"
-K6_EXIT=${PIPESTATUS[0]}
+if [ "$SCENARIO" = gatling ]; then
+  export GATLING_RATE="${GATLING_RATE:-50}" GATLING_SECONDS="${GATLING_SECONDS:-60}"
+  mvn -q -B -f load/gatling gatling:test -Drate="$GATLING_RATE" -Dseconds="$GATLING_SECONDS" \
+    -DbaseUrl=http://localhost:8080 2>&1 | tee "$RUN_DIR/raw/gatling.log"
+  K6_EXIT=${PIPESTATUS[0]}
+  # Gatling writes its statistics as JSON inside js/stats.js; pull the "All Requests" object out into summary.json.
+  STATS="$(ls -d load/gatling/target/gatling/*/ 2>/dev/null | tail -1)js/stats.js"
+  [ -f "$STATS" ] && python3 - "$STATS" "$RUN_DIR/summary.json" <<'PY'
+import json, sys
+text = open(sys.argv[1]).read()
+start = text.index("stats: {") + len("stats: ")
+depth = 0
+for end in range(start, len(text)):
+    if text[end] == "{":
+        depth += 1
+    elif text[end] == "}":
+        depth -= 1
+        if depth == 0:
+            break
+json.dump(json.loads(text[start:end + 1]), open(sys.argv[2], "w"), indent=1)
+PY
+else
+  SUMMARY_PATH="$RUN_DIR/summary.json" k6 run --quiet "load/k6/$SCENARIO.js" 2>&1 | tee "$RUN_DIR/raw/k6.log"
+  K6_EXIT=${PIPESTATUS[0]}
+fi
 set -e
 
 echo "==> wait for the pipeline to drain"
