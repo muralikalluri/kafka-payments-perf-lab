@@ -119,6 +119,9 @@ for i in $(seq 1 300); do
 done
 [ "$left" = 0 ] || echo "WARNING: $left payments still not terminal after 300 s; invariants will fail" >&2
 
+echo "==> explain plans (F-06 evidence)"
+./scripts/explain-analyze.sh "$RUN_DIR"
+
 echo "==> collect"
 python3 scripts/collect_results.py --run-dir "$RUN_DIR" --profile "$PROFILE" --scenario "$SCENARIO" \
   --k6-exit "$K6_EXIT"

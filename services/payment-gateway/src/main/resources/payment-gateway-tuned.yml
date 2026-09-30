@@ -12,7 +12,12 @@ lab:
     f12: true
 
 # F-03: consumer concurrency matched to the partition count (one thread per partition, single instance).
+
 spring:
   kafka:
     listener:
       concurrency: 12
+
+# F-06: tuned-only migrations (indexes) in a separate Flyway location and version range (V100+).
+  flyway:
+    locations: classpath:db/gateway,classpath:db/gateway-tuned
