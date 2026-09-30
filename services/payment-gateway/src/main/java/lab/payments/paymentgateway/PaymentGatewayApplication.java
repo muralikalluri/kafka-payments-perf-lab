@@ -4,8 +4,10 @@ import lab.payments.common.TopicsConfig;
 import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Import;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 @SpringBootApplication
+@EnableScheduling
 @Import(TopicsConfig.class)
 public class PaymentGatewayApplication {
 

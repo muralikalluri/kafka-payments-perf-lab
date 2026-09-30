@@ -133,6 +133,22 @@ final class Lab {
 
     /** Reads a topic from the start and returns the record key of the first record containing the needle. */
     static String keyOf(String topic, String needle) {
+        return recordWith(topic, needle).key();
+    }
+
+    static String valueOf(String topic, String needle) {
+        return recordWith(topic, needle).value();
+    }
+
+    static void pauseKafka() {
+        KAFKA.getDockerClient().pauseContainerCmd(KAFKA.getContainerId()).exec();
+    }
+
+    static void unpauseKafka() {
+        KAFKA.getDockerClient().unpauseContainerCmd(KAFKA.getContainerId()).exec();
+    }
+
+    private static ConsumerRecord<String, String> recordWith(String topic, String needle) {
         Properties props = new Properties();
         props.put("bootstrap.servers", KAFKA.getBootstrapServers());
         props.put("group.id", "lab-test-" + UUID.randomUUID());
@@ -148,7 +164,7 @@ final class Lab {
             while (System.currentTimeMillis() < deadline) {
                 for (ConsumerRecord<String, String> r : consumer.poll(Duration.ofMillis(500))) {
                     if (r.value().contains(needle)) {
-                        return r.key();
+                        return r;
                     }
                 }
             }

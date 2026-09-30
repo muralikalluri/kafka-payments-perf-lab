@@ -13,6 +13,12 @@ lab:
 
 # F-03: consumer concurrency matched to the partition count (one thread per partition, single instance).
 spring:
+  datasource:
+    hikari:
+      # F-07: pool sized for a 2-CPU Postgres shared by three services, not left at the default with
+      # far more threads than connections. Lab choice, not swept; see docs/adr/0004-outbox-and-tuning.md.
+      maximum-pool-size: 6
+      connection-timeout: 5000
   kafka:
     listener:
       concurrency: 12
