@@ -23,7 +23,12 @@ from collect_results import SLO_ERROR_RATE, SLO_P99_MS, SLO_RECOVERY_SECONDS  # 
 
 SRC = os.path.join(L.ROOT, "sample-deliverable", "src")
 OUT = os.path.join(L.ROOT, "sample-deliverable")
-TEMPLATES = ["AUDIT_REPORT_SAMPLE.md", "QUICK_AUDIT_ledger-service.md"]
+DOCS_SRC = os.path.join(L.ROOT, "docs", "src")
+# (template directory, file name, output directory)
+TARGETS = [(SRC, "AUDIT_REPORT_SAMPLE.md", OUT), (SRC, "QUICK_AUDIT_ledger-service.md", OUT),
+           (DOCS_SRC, "README.md", L.ROOT)]
+TEMPLATES = [name for _, name, _ in TARGETS]
+GIF_PATH = "docs/img/grafana-spike.gif"
 EFFORT_X = {"S": 0.2, "M": 0.62, "L": 0.85}
 EFFORT_ORDER = "SML"
 RISK_ORDER = ["Low", "Medium", "High"]
@@ -245,7 +250,7 @@ def ranges_sentence(b_fail, t_pass) -> str:
         return "The step lists did not bracket both limits, so no comparison of sustained load is made here."
     if b_fail <= t_pass:
         return ("The two step ranges do not overlap, so the tuned profile sustains a clearly higher load, but the "
-                "step lists are coarse and this report deliberately gives no single \"times faster\" figure.")
+                "step lists are coarse, so no single \"times faster\" figure is given.")
     return "The step ranges overlap, so the data does not show a clear difference in sustained load."
 
 
@@ -262,14 +267,22 @@ def spike_caveat(runs: dict, t_pass) -> str:
 
 
 def earlier_spike_note(runs: dict) -> str:
-    recovered = runs["baseline_spike"].result["spike"]["recovered_within_run"]
-    if recovered:
-        return ("An earlier recording of the baseline spike scenario (commit `eecb939`), made before the "
-                "baseline-affecting fixes, also recovered within the window; the two recordings' recovery times are "
-                "not compared here.")
-    return ("An earlier recording of the baseline spike scenario (commit `eecb939`), made before the baseline-affecting "
-            "fixes, did recover within the window; the current one did not. The difference was not attributed to a "
-            "cause and may be run-to-run variance.")
+    """How the baseline spike recordings relate. The earlier recording is a fact from git history (commit eecb939)."""
+    standard = runs["baseline_spike"].result["spike"]["recovered_within_run"]
+    recorded = runs.get("baseline_spike_recorded")
+    text = ("An earlier recording of the baseline spike scenario (commit `eecb939`), made before the baseline-affecting "
+            "fixes, recovered within the window; the standard recording used in the tables above "
+            + ("also did." if standard else "did not."))
+    outcomes = [True, standard]
+    if recorded is not None:
+        rec = recorded.result["spike"]["recovered_within_run"]
+        outcomes.append(rec)
+        text += (f" A further recording, taken while the dashboard was being captured (`{os.path.basename(recorded.dir)}`), "
+                 + ("also recovered." if rec else "did not recover."))
+    if len(set(outcomes)) > 1:
+        text += (" The recordings disagree, which shows run-to-run variance in this scenario for the baseline; no cause was "
+                 "attributed and no single recovery time is claimed.")
+    return text
 
 
 def score_order_note(fs: list) -> str:
@@ -287,6 +300,50 @@ def queueing_note(runs: dict) -> str:
                 "overloaded pipeline, not its service time. Baseline steps are also not independent, because its cost grows as "
                 "the tables fill during a run.")
     return "Baseline steps are not independent, because its cost grows as the tables fill during a run."
+
+
+def java_version() -> str:
+    with open(os.path.join(L.ROOT, "pom.xml")) as fh:
+        return re.search(r"<java.version>(\d+)</java.version>", fh.read()).group(1)
+
+
+def recorded_runs(runs: dict) -> list:
+    return [runs[k] for k in ("baseline_spike_recorded", "tuned_spike_recorded") if k in runs]
+
+
+def gif_caption(runs: dict) -> str:
+    rec = recorded_runs(runs)
+    spike = runs["baseline_spike"].result["params"]
+    text = (f"Grafana during the spike scenario (offered rate raised from {spike['base_req_per_s']} to "
+            f"{spike['burst_req_per_s']} req/s for {spike['burst_seconds']} s); baseline on the left, tuned on the right. "
+            "Captured from the dashboard in this repository while the two runs stored in "
+            + ", ".join(f"`{os.path.basename(r.dir)}`" for r in rec)
+            + " executed (the capture adds some load, so they are not the runs used in the comparison tables). "
+            "Small negative lag values are most likely an artefact of how the exporter samples offsets.")
+    if len(rec) == 2:
+        text += (f" Spike recovery in these recordings: baseline, {L.spike_recovery_text(rec[0])}; "
+                 f"tuned, {L.spike_recovery_text(rec[1])}.")
+    return text
+
+
+def headline_table(runs: dict, b_pass, b_fail, t_pass, t_fail, source: str) -> str:
+    b, t = runs["baseline_steady"], runs["tuned_steady"]
+    rows = [
+        ["Highest offered rate that met the objective (req/s)", b_pass, t_pass],
+        ["First offered rate that missed it (req/s)", b_fail if b_fail is not None else "not reached",
+         (f"{t_fail} (offered only in an additional run)" if t_fail is not None and source and not source.endswith("tuned_steady")
+          else (t_fail if t_fail is not None else "not reached"))],
+        [f"End-to-end p50 at the lowest steady step ({b.phases[0]['target_req_per_s']} req/s)",
+         L.ms(b.phases[0]["e2e_ms"]["p50"]), L.ms(t.phases[0]["e2e_ms"]["p50"])],
+        ["Spike recovery, standard run", L.spike_recovery_text(runs["baseline_spike"]),
+         L.spike_recovery_text(runs["tuned_spike"])],
+    ]
+    explain = {(r[0], r[1]): r for r in L.explain_rows(runs)}
+    for query in ("idempotency lookup", "daily outflow"):
+        bq, tq = explain.get(("baseline", query)), explain.get(("tuned", query))
+        if bq and tq:
+            rows.append([f"Query plan, {query} (F-06)", f"{bq[2]}, {bq[4]}", f"{tq[2]}, {tq[4]}"])
+    return L.table(["", "Baseline", "Tuned"], rows)
 
 
 def payment_share(runs: dict) -> str:
@@ -367,6 +424,13 @@ def build_values(runs: dict) -> dict:
         "fact.mix_failing": pct(mix["failing"]), "fact.merchant_skew": pct(mix["skew"]),
         "fact.smoke_vus": str(smoke_vus),
         "fact.top_n": str(TOP_N), "fact.top3": top_three(fs),
+        "fact.run_count": str(len(runs)),
+        "fact.payments_total": f"{sum(r.result['pipeline']['payments_created'] for r in runs.values()):,}",
+        "fact.java_version": java_version(),
+        "fact.gif_path": GIF_PATH,
+        "fact.gif_caption": gif_caption(runs),
+        "table.headline": headline_table(runs, b_pass, b_fail, t_pass, t_fail, fail_source),
+        "table.adrs": L.adr_table(),
         "fact.quadrants": quadrants_sentence(fs),
         "table.steady_baseline": L.steady_table(runs["baseline_steady"]),
         "table.steady_tuned": L.steady_table(runs["tuned_steady"]),
@@ -418,10 +482,10 @@ def main() -> int:
     runs = L.load_runs()
     values = build_values(runs)
     stale = []
-    for name in TEMPLATES:
-        with open(os.path.join(SRC, name + ".tmpl")) as fh:
+    for src_dir, name, out_dir in TARGETS:
+        with open(os.path.join(src_dir, name + ".tmpl")) as fh:
             rendered = render(fh.read(), values)
-        target = os.path.join(OUT, name)
+        target = os.path.join(out_dir, name)
         if check:
             current = open(target).read() if os.path.exists(target) else None
             if current != rendered:

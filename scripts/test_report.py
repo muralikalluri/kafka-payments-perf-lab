@@ -168,9 +168,14 @@ class FactsTest(unittest.TestCase):
         mutated = copy.deepcopy(self.runs)
         spike = mutated["baseline_spike"].result["spike"]
         spike["recovered_within_run"], spike["recovery_seconds_after_burst"] = True, 42.0
-        self.assertIn("also recovered", G.earlier_spike_note(mutated))
+        self.assertIn("also did", G.earlier_spike_note(mutated))
         self.assertIn("42 s after", L.spike_recovery_text(mutated["baseline_spike"]))
-        self.assertIn("the current one did not", G.earlier_spike_note(self.runs))
+        self.assertIn("did not", G.earlier_spike_note(self.runs))
+        self.assertIn("disagree", G.earlier_spike_note(self.runs))
+        agreeing = copy.deepcopy(self.runs)
+        for key in ("baseline_spike", "baseline_spike_recorded"):
+            agreeing[key].result["spike"]["recovered_within_run"] = True
+        self.assertNotIn("disagree", G.earlier_spike_note(agreeing))
         tuned = copy.deepcopy(self.runs)
         tuned["tuned_spike"].result["spike"]["recovered_within_run"] = False
         self.assertIn("had not recovered", G.spike_caveat(tuned, 800))
@@ -216,14 +221,59 @@ class RoadmapTest(unittest.TestCase):
 
 
 class FreshnessTest(unittest.TestCase):
-    def test_committed_reports_match_a_fresh_generation(self):
+    def test_committed_documents_match_a_fresh_generation(self):
         runs = L.load_runs()
         values = G.build_values(runs)
-        for name in G.TEMPLATES:
-            with open(os.path.join(G.SRC, name + ".tmpl")) as fh:
+        for src_dir, name, out_dir in G.TARGETS:
+            with open(os.path.join(src_dir, name + ".tmpl")) as fh:
                 expected = G.render(fh.read(), values)
-            with open(os.path.join(G.OUT, name)) as fh:
+            with open(os.path.join(out_dir, name)) as fh:
                 self.assertEqual(fh.read(), expected, f"{name} is stale: run scripts/generate_report.py")
+
+
+class ReadmeTest(unittest.TestCase):
+    """The global README order: pitch and badges, GIF, results, architecture, quickstart, features, design
+    decisions, sample deliverable, hire-me link. Plus link integrity and the insecure-code banner."""
+
+    @classmethod
+    def setUpClass(cls):
+        with open(os.path.join(L.ROOT, "README.md")) as fh:
+            cls.readme = fh.read()
+
+    def test_sections_are_in_the_required_order(self):
+        markers = ["![CI]", "![Grafana during the spike", "## Results", "```mermaid", "## Quickstart", "## Features",
+                   "## Design decisions", "## Sample deliverables", "## Hire me"]
+        positions = [self.readme.find(m) for m in markers]
+        self.assertNotIn(-1, positions, dict(zip(markers, positions)))
+        self.assertEqual(positions, sorted(positions))
+        self.assertTrue(self.readme.rstrip().splitlines()[-1].startswith("If you need an audit"))
+
+    def test_relative_links_resolve(self):
+        import re
+        for name in ("README.md", os.path.join("sample-deliverable", "AUDIT_REPORT_SAMPLE.md"),
+                     os.path.join("sample-deliverable", "QUICK_AUDIT_ledger-service.md")):
+            path = os.path.join(L.ROOT, name)
+            with open(path) as fh:
+                text = fh.read()
+            for target in re.findall(r"\]\(([^)#\s]+)", text):
+                if target.startswith(("http://", "https://", "mailto:")):
+                    continue
+                self.assertTrue(os.path.exists(os.path.normpath(os.path.join(os.path.dirname(path), target))),
+                                f"{name} links to a missing file: {target}")
+
+    def test_banner_and_hire_me_link(self):
+        self.assertIn("Deliberately insecure for demonstration. Do not deploy.", self.readme)
+        self.assertIn("https://www.upwork.com/freelancers/", self.readme)
+
+    def test_insecure_lab_code_carries_the_banner(self):
+        for rel in ("services/validation-service/src/main/java/lab/payments/validationservice/LabAdminController.java",
+                    "services/payment-gateway/src/main/java/lab/payments/paymentgateway/PaymentController.java"):
+            with open(os.path.join(L.ROOT, rel)) as fh:
+                self.assertIn("Deliberately insecure for demonstration. Do not deploy.", fh.read(), rel)
+
+    def test_no_secrets_or_local_paths(self):
+        self.assertNotIn("/Users/", self.readme)
+        self.assertNotIn("kalluri.murali", self.readme)
 
 
 if __name__ == "__main__":

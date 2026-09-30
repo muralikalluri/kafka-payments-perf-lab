@@ -10,6 +10,10 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 
+/**
+ * Deliberately insecure for demonstration. Do not deploy. The client identity is taken from the trusted
+ * X-Client-Id request header; a real deployment derives it from authentication.
+ */
 @RestController
 class PaymentController {
 

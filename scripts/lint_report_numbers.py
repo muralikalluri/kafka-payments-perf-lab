@@ -24,7 +24,7 @@ ALLOWED = [
     r"\]\([^)]*\)", r"https?://\S+",                    # link targets and bare URLs
     r"\bF-(?:0[1-9]|1[0-3])\b", r"\bADR-000[1-9]\b", r"\bM[0-7]\b", r"\bQ-[A-G]\b",
     r"\b[Ss]ections? [1-9]\b", r"\bAppendix [A-C]\b",
-    r"\bdouble-entry\b", r"\bp(?:50|95|99)\b", r"\blz4\b", r"\bN\+1\b", r"\bSHA-256\b", r"\bUUIDv5\b",
+    r"\bdouble-entry\b", r"\bk6\b", r"\bISO 20022\b", r"\bp(?:50|95|99)\b", r"\blz4\b", r"\bN\+1\b", r"\bSHA-256\b", r"\bUUIDv5\b",
     r"\bHTTP (?:202|404|422|503)\b(?!\s*(?:req|ms|s\b|/))", r"\banswers 503\b(?!\s*(?:req|ms|s\b|/))", r"\bpacs\.008\b",
     r"^\s*\d{1,2}\.\s", r"^#{1,4} (?:[1-9]\. |Appendix [A-C]\. )",
 ]
@@ -104,7 +104,7 @@ def lint(path: str) -> list:
 def main() -> int:
     paths = sys.argv[1:] or (sorted(glob.glob(os.path.join(ROOT, "sample-deliverable", "src", "*.tmpl")))
                              + sorted(glob.glob(os.path.join(ROOT, "sample-deliverable", "src", "*.json")))
-                             + sorted(glob.glob(os.path.join(ROOT, "report", "src", "*.tmpl"))))
+                             + sorted(glob.glob(os.path.join(ROOT, "docs", "src", "*.tmpl"))))
     problems = [p for path in paths for p in lint(path)]
     for p in problems:
         print(p, file=sys.stderr)

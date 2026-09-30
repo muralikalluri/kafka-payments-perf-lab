@@ -2,7 +2,7 @@
 
 **Client:** Larkspur Pay, a fictional payments company. **System:** a credit-transfer pipeline of 3 Spring Boot services, Kafka and Postgres.
 
-> This is a sample deliverable produced from the lab in this repository. The client, the system and all data are fictional. Every figure below is generated from the committed benchmark results (`results/`) at git revisions `06ce6f4`, `958b37b`. The report shows the method end to end: baseline, measure, diagnose, fix, re-measure, report. Read section 9 (limits of this evidence) before quoting any number.
+> This is a sample deliverable produced from the lab in this repository. The client, the system and all data are fictional. Every figure below is generated from the committed benchmark results (`results/`) at git revisions `06ce6f4`, `8862be4`, `958b37b`. The report shows the method end to end: baseline, measure, diagnose, fix, re-measure, report. Read section 9 (limits of this evidence) before quoting any number.
 
 ## 1. Executive summary
 
@@ -10,11 +10,11 @@
 
 **Capacity as found.** Under the stepped load, the baseline pipeline met the objective at every offered rate up to 200 req/s and missed it at 400 req/s. The true limit lies between those steps.
 
-**After tuning.** With all 8 changes applied, the tuned pipeline met the objective at every offered rate up to 800 req/s and missed it at 1200 req/s. The true limit lies between those steps. The step that missed it was offered only in the additional run `2026-09-30_tuned_steady_extended`. The two step ranges do not overlap, so the tuned profile sustains a clearly higher load, but the step lists are coarse and this report deliberately gives no single "times faster" figure.
+**After tuning.** With all 8 changes applied, the tuned pipeline met the objective at every offered rate up to 800 req/s and missed it at 1200 req/s. The true limit lies between those steps. The step that missed it was offered only in the additional run `2026-09-30_tuned_steady_extended`. The two step ranges do not overlap, so the tuned profile sustains a clearly higher load, but the step lists are coarse, so no single "times faster" figure is given.
 
 **Spike behaviour.** The burst raised the offered rate from 50 to 500 req/s for 60 s. Baseline result: not recovered within the observed window (the recovery phase lasted 120 s); the true recovery time is unknown. Tuned result: no degradation was observed, and payments created after the burst all met the SLO. The burst rate is below the highest step the tuned profile sustained in the steady runs, so the tuned system was never overloaded by the burst: this shows no degradation under the same load, not a faster recovery.
 
-**Correctness.** Across all 8 recorded runs (662,316 payments created in total), no balance went negative, debits equalled credits, and every payment reached a terminal state (sections 4 and 8).
+**Correctness.** Across all 10 recorded runs (729,781 payments created in total), no balance went negative, debits equalled credits, and every payment reached a terminal state (sections 4 and 8).
 
 **Top 3 fixes** by assessed impact, then effort, then risk: F-04, F-06, F-03 (needs F-12, F-07 first). Ranked by impact against effort (section 7): quick wins F-03, F-06; major projects F-04, F-07, F-12. The recommended order differs from the ranking because of dependencies (for example, more consumer threads only help after more partitions and larger pools); section 7 gives the order.
 
@@ -44,9 +44,11 @@
 |---|---|
 | `2026-09-30_baseline_smoke` | 10 virtual users for 60 s |
 | `2026-09-30_baseline_spike` | base 50 req/s, burst 500 req/s for 60 s after 30 s, then 120 s recovery |
+| `2026-09-30_baseline_spike_recorded` | base 50 req/s, burst 500 req/s for 60 s after 30 s, then 120 s recovery |
 | `2026-09-30_baseline_steady` | steps 100, 200, 400, 800 req/s, 60 s each |
 | `2026-09-30_tuned_smoke` | 10 virtual users for 60 s |
 | `2026-09-30_tuned_spike` | base 50 req/s, burst 500 req/s for 60 s after 30 s, then 120 s recovery |
+| `2026-09-30_tuned_spike_recorded` | base 50 req/s, burst 500 req/s for 60 s after 30 s, then 120 s recovery |
 | `2026-09-30_tuned_steady` | steps 100, 200, 400, 800 req/s, 60 s each |
 | `2026-09-30_tuned_steady_coldstart-800-3200` | steps 800, 1600, 2400, 3200 req/s, 60 s each |
 | `2026-09-30_tuned_steady_extended` | steps 400, 800, 1200, 1600 req/s, 60 s each |
@@ -100,6 +102,7 @@ A client submits a payment with an idempotency key. The gateway records it, assi
 |---|---|---|---|---|---|---|
 | `2026-09-30_baseline_smoke` | 1640 | yes | 0 | 0 | 0 | 0 |
 | `2026-09-30_baseline_spike` | 33836 | yes | 0 | 0 | 0 | 0 |
+| `2026-09-30_baseline_spike_recorded` | 33759 | yes | 0 | 0 | 0 | 0 |
 | `2026-09-30_baseline_steady` | 62009 | yes | 0 | 0 | 0 | 0 |
 
 ## 5. Findings
@@ -284,6 +287,7 @@ quadrantChart
 |---|---|---|---|---|---|---|
 | `2026-09-30_tuned_smoke` | 1660 | yes | 0 | 0 | 0 | 0 |
 | `2026-09-30_tuned_spike` | 33808 | yes | 0 | 0 | 0 | 0 |
+| `2026-09-30_tuned_spike_recorded` | 33706 | yes | 0 | 0 | 0 | 0 |
 | `2026-09-30_tuned_steady` | 81001 | yes | 0 | 0 | 0 | 0 |
 | `2026-09-30_tuned_steady_coldstart-800-3200` | 238631 | yes | 0 | 0 | 0 | 0 |
 | `2026-09-30_tuned_steady_extended` | 209731 | yes | 0 | 0 | 0 | 0 |
@@ -310,7 +314,7 @@ quadrantChart
 - The limits are known only to step resolution, so any ratio is a range. The offered rate at which dropped iterations appear reflects latency backing up into the load generator; host contention may contribute and was not isolated.
 - Only the combination of all 8 changes was measured. The per-finding impact in section 7 is an informed assessment. An ablation (tuned with one change reverted) is the way to measure each one and is recommended before investing in the larger items.
 - No consumer lag, CPU, garbage-collection or lock-wait data was captured, so which stage limits either profile is not established. The dashboard exists (`grafana/dashboards`) but no snapshots were stored with the results.
-- An earlier recording of the baseline spike scenario (commit `eecb939`), made before the baseline-affecting fixes, did recover within the window; the current one did not. The difference was not attributed to a cause and may be run-to-run variance.
+- An earlier recording of the baseline spike scenario (commit `eecb939`), made before the baseline-affecting fixes, recovered within the window; the standard recording used in the tables above did not. A further recording, taken while the dashboard was being captured (`2026-09-30_baseline_spike_recorded`), also recovered. The recordings disagree, which shows run-to-run variance in this scenario for the baseline; no cause was attributed and no single recovery time is claimed.
 - The query plans were captured after the runs at different table sizes.
 - Replays of an earlier idempotency key create no payment, so payments created are about 90% of the requests sent in the steady and spike runs.
 
@@ -428,9 +432,11 @@ spring:
 |---|---|---|
 | `2026-09-30_baseline_smoke` | 06ce6f4 | [result.json](../results/2026-09-30_baseline_smoke/result.json) · [summary.json](../results/2026-09-30_baseline_smoke/summary.json) · [env.txt](../results/2026-09-30_baseline_smoke/env.txt) · [explain.txt](../results/2026-09-30_baseline_smoke/explain.txt) |
 | `2026-09-30_baseline_spike` | 06ce6f4 | [result.json](../results/2026-09-30_baseline_spike/result.json) · [summary.json](../results/2026-09-30_baseline_spike/summary.json) · [env.txt](../results/2026-09-30_baseline_spike/env.txt) · [explain.txt](../results/2026-09-30_baseline_spike/explain.txt) |
+| `2026-09-30_baseline_spike_recorded` | 8862be4 | [result.json](../results/2026-09-30_baseline_spike_recorded/result.json) · [summary.json](../results/2026-09-30_baseline_spike_recorded/summary.json) · [env.txt](../results/2026-09-30_baseline_spike_recorded/env.txt) · [explain.txt](../results/2026-09-30_baseline_spike_recorded/explain.txt) |
 | `2026-09-30_baseline_steady` | 06ce6f4 | [result.json](../results/2026-09-30_baseline_steady/result.json) · [summary.json](../results/2026-09-30_baseline_steady/summary.json) · [env.txt](../results/2026-09-30_baseline_steady/env.txt) · [explain.txt](../results/2026-09-30_baseline_steady/explain.txt) |
 | `2026-09-30_tuned_smoke` | 06ce6f4 | [result.json](../results/2026-09-30_tuned_smoke/result.json) · [summary.json](../results/2026-09-30_tuned_smoke/summary.json) · [env.txt](../results/2026-09-30_tuned_smoke/env.txt) · [explain.txt](../results/2026-09-30_tuned_smoke/explain.txt) |
 | `2026-09-30_tuned_spike` | 06ce6f4 | [result.json](../results/2026-09-30_tuned_spike/result.json) · [summary.json](../results/2026-09-30_tuned_spike/summary.json) · [env.txt](../results/2026-09-30_tuned_spike/env.txt) · [explain.txt](../results/2026-09-30_tuned_spike/explain.txt) |
+| `2026-09-30_tuned_spike_recorded` | 8862be4 | [result.json](../results/2026-09-30_tuned_spike_recorded/result.json) · [summary.json](../results/2026-09-30_tuned_spike_recorded/summary.json) · [env.txt](../results/2026-09-30_tuned_spike_recorded/env.txt) · [explain.txt](../results/2026-09-30_tuned_spike_recorded/explain.txt) |
 | `2026-09-30_tuned_steady` | 06ce6f4 | [result.json](../results/2026-09-30_tuned_steady/result.json) · [summary.json](../results/2026-09-30_tuned_steady/summary.json) · [env.txt](../results/2026-09-30_tuned_steady/env.txt) · [explain.txt](../results/2026-09-30_tuned_steady/explain.txt) |
 | `2026-09-30_tuned_steady_coldstart-800-3200` | 958b37b | [result.json](../results/2026-09-30_tuned_steady_coldstart-800-3200/result.json) · [summary.json](../results/2026-09-30_tuned_steady_coldstart-800-3200/summary.json) · [env.txt](../results/2026-09-30_tuned_steady_coldstart-800-3200/env.txt) · [explain.txt](../results/2026-09-30_tuned_steady_coldstart-800-3200/explain.txt) |
 | `2026-09-30_tuned_steady_extended` | 958b37b | [result.json](../results/2026-09-30_tuned_steady_extended/result.json) · [summary.json](../results/2026-09-30_tuned_steady_extended/summary.json) · [env.txt](../results/2026-09-30_tuned_steady_extended/env.txt) · [explain.txt](../results/2026-09-30_tuned_steady_extended/explain.txt) |

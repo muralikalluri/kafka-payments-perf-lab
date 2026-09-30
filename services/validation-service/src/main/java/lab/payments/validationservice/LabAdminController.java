@@ -21,6 +21,8 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
+ * Deliberately insecure for demonstration. Do not deploy.
+ *
  * F-13 (tuned, lab only): changes an account's status and publishes account.updated so cached copies
  * are invalidated. It exists so the cache-invalidation path can be exercised; it is not part of the
  * payment API and is only registered when lab.tuning.f13 is on. Protected by a shared admin token

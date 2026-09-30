@@ -189,7 +189,7 @@ def spike_recovery_text(run: Run) -> str:
     seconds = spike["recovery_seconds_after_burst"]
     if seconds == 0:
         return "no degradation was observed, and payments created after the burst all met the SLO"
-    return f"{seconds:.0f} s after the burst ended"
+    return f"recovered {seconds:.0f} s after the burst ended"
 
 
 def _short_java(text: str) -> str:
@@ -294,7 +294,8 @@ def invariants_table(runs: dict, profile=None) -> str:
                   "Debits minus credits (minor units)", "Non-terminal payments", "Sequence conflicts"], rows)
 
 
-def explain_table(runs: dict) -> str:
+def explain_rows(runs: dict) -> list:
+    """[(profile, query, plan node, rows removed, execution time)] from the steady runs' explain.txt."""
     rows = []
     for prof in ("baseline", "tuned"):
         r = runs.get(f"{prof}_steady")
@@ -309,7 +310,11 @@ def explain_table(runs: dict) -> str:
                          node.strip() if node else "n/a",
                          removed.group(1) if removed else "none reported",
                          f"{float(exec_ms.group(1)):.2f} ms" if exec_ms else "n/a"])
-    return table(["Profile", "Query", "Plan node", "Rows removed by filter", "Execution time"], rows)
+    return rows
+
+
+def explain_table(runs: dict) -> str:
+    return table(["Profile", "Query", "Plan node", "Rows removed by filter", "Execution time"], explain_rows(runs))
 
 
 def partition_table(runs: dict, profiles=("baseline", "tuned")) -> str:
@@ -360,3 +365,14 @@ def params_table(runs: dict) -> str:
             desc = f"{p['vus']} virtual users for {p['duration_seconds']} s"
         rows.append([f"`{os.path.basename(r.dir)}`", desc])
     return table(["Run", "Scenario parameters"], rows)
+
+
+def adr_table() -> str:
+    """Links to every ADR, titled from its own first heading."""
+    rows = []
+    for path in sorted(glob.glob(os.path.join(ROOT, "docs", "adr", "[0-9]*.md"))):
+        with open(path) as fh:
+            title = fh.readline().lstrip("# ").strip()
+        name = os.path.basename(path)
+        rows.append([f"[{title.split(':')[0]}](docs/adr/{name})", title.split(":", 1)[1].strip() if ":" in title else title])
+    return table(["ADR", "Decision"], rows)

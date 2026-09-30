@@ -1,0 +1,101 @@
+# kafka-payments-perf-lab
+
+![CI](https://github.com/muralikalluri/kafka-payments-perf-lab/actions/workflows/ci.yml/badge.svg)
+![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)
+![Java](https://img.shields.io/badge/Java-21-orange.svg)
+![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5-6db33f.svg)
+![Kafka](https://img.shields.io/badge/Apache%20Kafka-KRaft-231f20.svg)
+
+**A realistic Spring Boot and Kafka payment pipeline, shipped as a baseline (as commonly built) and a tuned profile, with load tests, dashboards, query-plan evidence and a sample performance audit report.** It is the public proof behind a performance-audit service: it shows how problems are found, fixed and re-measured, and what the resulting report looks like. All companies, people and data are fictional.
+
+> Deliberately insecure for demonstration. Do not deploy. (Client identity is a trusted request header, credentials are placeholders, and the tuned profile has a token-protected lab administration endpoint. The performance flaws in the baseline are intentional too.)
+
+![Grafana during the spike scenario: baseline on the left, tuned on the right]({{fact.gif_path}})
+
+*{{fact.gif_caption}}*
+
+## Results
+
+Generated from the committed benchmark results in `results/` (git {{env.git_revisions_label}} {{env.git_shas}}, {{env.cpu_model}}, {{env.cores}} cores, load generator and services on the same machine). Objective: end-to-end p99 under {{slo.p99_ms}} ms, HTTP error rate under {{slo.error_rate}}, no dropped iterations.
+
+{{table.headline}}
+
+The same offered rates against both profiles (end-to-end = payment accepted until its terminal status is recorded):
+
+{{table.steady_comparison}}
+
+**Read this before quoting a number.**
+- Limits are known only to step resolution, so each profile has a range, not a point. {{fact.ranges_sentence}}
+- {{fact.tuned_spike_caveat}}
+- {{fact.earlier_spike_note}}
+- {{fact.low_load_latency}}
+- Only the combination of all {{fact.findings_count}} changes was measured; the effect of each change alone was not isolated, and no per-stage measurements (lag, CPU, garbage collection, lock waits) were captured. See the limits section of the [sample audit report](sample-deliverable/AUDIT_REPORT_SAMPLE.md).
+- Correctness held in every run: no negative balances, debits equal credits, every payment reached a terminal state ({{fact.payments_total}} payments across {{fact.run_count}} runs).
+
+## Architecture
+
+```mermaid
+flowchart LR
+    Client -->|POST /payments| GW[payment-gateway]
+    GW -->|payments.initiated| VAL[validation-service]
+    VAL -->|payments.validated| LED[ledger-service]
+    LED -->|payments.posted| GW
+    GW --> PG[(Postgres: gateway schema)]
+    VAL --> PGV[(Postgres: validation schema)]
+    LED --> PGL[(Postgres: ledger schema)]
+    VAL -. tuned only .-> R[(Redis account cache)]
+    GW -. notification stub .-> N[notification]
+```
+
+The credit-transfer flow is loosely modelled on ISO 20022 pacs.008 (simplified JSON, not a compliance implementation). Correctness holds in both profiles: idempotent `POST` (deterministic payment identifiers), exactly-once effect on the ledger (a dedup record in the same transaction as the postings), balances that never go negative, and per-debtor ordering by sequence number.
+
+## Quickstart
+
+Requires a JDK ({{fact.java_version}}), Maven, Docker, k6 and Python.
+
+```bash
+cp .env.example .env                      # placeholder credentials for local use only
+mvn verify                                # unit and Testcontainers tests, baseline profile
+mvn verify -Dlab.profile=tuned -pl services/e2e-tests -am    # the same invariants, tuned profile
+
+# benchmark a profile from a clean state (resets the stack, starts the services, runs k6, checks invariants)
+./scripts/run-benchmark.sh baseline steady
+./scripts/run-benchmark.sh tuned steady
+
+# regenerate the sample reports and this README from results/
+python3 scripts/generate_report.py
+```
+
+Results land in `results/<date>_<profile>_<scenario>/` (`result.json`, `summary.json`, `env.txt`, `explain.txt`). The Grafana dashboard is provisioned automatically; the services run on the host and Prometheus scrapes them.
+
+## Features
+
+- {{fact.service_count}} services (gateway, validation, ledger) with the notification service stubbed, on a single Kafka broker in KRaft mode, Postgres with Flyway, and Redis for the tuned cache.
+- Profiles: `baseline` carries common real-world anti-patterns on purpose; `tuned` fixes each numbered finding behind its own flag, one commit per finding.
+- Load scenarios in k6 (smoke, steady stepped arrival rate, spike) and a runner that resets the stack, records the environment, checks the ledger invariants and derives every figure from the database and k6 output.
+- Micrometer metrics, Prometheus, Kafka and Postgres exporters and one provisioned Grafana dashboard.
+- Query-plan evidence (`EXPLAIN (ANALYZE, BUFFERS)`) captured after every run.
+- A sample audit report and a single-service quick audit, generated from the results with a lint that rejects any hand-typed number.
+
+The findings covered: F-01 producer batching, F-03 consumer concurrency, F-04 batch ledger writes, F-06 indexes, F-07 outbox and pool sizing, F-08 N+1 queries, F-12 record key and partitions, F-13 distributed account cache.
+
+## Design decisions
+
+The reasoning behind the main choices is recorded as architecture decision records:
+
+{{table.adrs}}
+
+## Sample deliverables
+
+- [Full audit report (sample)](sample-deliverable/AUDIT_REPORT_SAMPLE.md): executive summary, method, architecture, baseline results, findings with evidence, impact, recommendation, effort and risk, an impact against effort matrix, architecture observations, tuned against baseline, and the limits of the evidence.
+- [Quick audit of one service (sample)](sample-deliverable/QUICK_AUDIT_ledger-service.md): a configuration and code review with no load test.
+
+## Scope and known gaps
+
+Built to the MVP cut in [SPEC.md](SPEC.md). Not built, by design: F-02, F-05, F-09, F-10 and F-11, the notification service, a multi-broker cluster, the soak scenario and Gatling, tracing and flame graphs, PDF styling and a reusable report template folder.
+
+Known gaps in what was built: no load shedding on the gateway outbox backlog; no consumer-lag, CPU, garbage-collection or lock-wait snapshots stored with the results; FX rates are cached in process rather than in Redis; connection-pool sizes are unswept lab choices; the cache accepts bounded staleness (a blocked account can be approved until its cached copy is invalidated or expires).
+
+## Hire me
+
+If you need an audit like this for your own Kafka and Spring Boot system: [hire me on Upwork](https://www.upwork.com/freelancers/~01c80d5fd70c92b97d?mp_source=share).
