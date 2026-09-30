@@ -3,6 +3,7 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
 import { Counter } from 'k6/metrics';
+import { summarise, trendStats } from './lib.js';
 
 const BASE = __ENV.GATEWAY_URL || 'http://localhost:8080';
 const CLIENT = 'client-demo';
@@ -12,6 +13,7 @@ export const options = {
   scenarios: {
     smoke: { executor: 'constant-vus', vus: 10, duration: '1m' },
   },
+  summaryTrendStats: trendStats,
   thresholds: {
     http_req_failed: ['rate<0.001'],
     wrong_final_status: ['count==0'],
@@ -86,4 +88,8 @@ export default function () {
   });
   if (!good) wrongFinalStatus.add(1);
   sleep(0.1);
+}
+
+export function handleSummary(data) {
+  return summarise(data);
 }
