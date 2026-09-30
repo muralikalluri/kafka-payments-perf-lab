@@ -1,0 +1,14 @@
+# TUNED profile (SPEC.md §3).
+lab:
+  topics:
+    partitions: 12         # F-12: every service sets it because each one's KafkaAdmin creates or grows the shared topics
+  tuning:
+    f05: true              # F-05: consume payments.posted and dispatch from a table with retries; the gateway makes no call
+    f09: true
+spring:
+  kafka:
+    listener:
+      concurrency: 12      # F-03
+  datasource:
+    hikari:
+      maximum-pool-size: 6   # F-07

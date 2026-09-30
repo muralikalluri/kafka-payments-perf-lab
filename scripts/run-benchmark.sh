@@ -23,7 +23,7 @@ esac
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
-SERVICES="payment-gateway validation-service ledger-service"
+SERVICES="payment-gateway validation-service ledger-service notification-service"
 
 if [ "$PROFILE" = tuned ]; then
   # The last M4 commit sets lab.tuning.complete=true in the gateway's tuned config. Until then a
@@ -63,7 +63,7 @@ for s in $SERVICES; do
 done
 for i in $(seq 1 90); do
   ok=1
-  for p in 8080 8081 8082; do curl -sf "localhost:$p/actuator/health" >/dev/null || ok=0; done
+  for p in 8080 8081 8082 8083; do curl -sf "localhost:$p/actuator/health" >/dev/null || ok=0; done
   [ "$ok" = 1 ] && break
   sleep 1
 done
@@ -87,6 +87,7 @@ echo "==> environment"
     echo "ram_bytes=$(awk '/MemTotal/ {print $2*1024}' /proc/meminfo)"
   fi
   echo "kafka_brokers=$($COMPOSE ps --services | grep -c '^kafka-[0-9]')"
+  echo "webhook_latency_ms=${WEBHOOK_LATENCY_MS:-5} webhook_failure_rate=${WEBHOOK_FAILURE_RATE:-0}"
   echo "docker_vm=$(docker info --format 'cpus={{.NCPU}} mem_bytes={{.MemTotal}}')"
   echo "java=$(java -version 2>&1 | head -1)"
   echo "k6=$(k6 version | head -1)"

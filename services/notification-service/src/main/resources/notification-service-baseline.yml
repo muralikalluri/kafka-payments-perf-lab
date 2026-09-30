@@ -1,0 +1,4 @@
+# BASELINE profile. In the baseline this service is only the webhook receiver: the gateway calls it directly (F-05).
+lab:
+  topics:
+    partitions: 3          # F-12

@@ -23,12 +23,12 @@ class PostedListener {
     private static final int TERMINAL_RANK = 3;
 
     private final JdbcTemplate jdbc;
-    private final NotificationStub notifications;
+    private final PostedNotifier notifications;
 
     private final MeterRegistry meters;
     private final Timer endToEnd;
 
-    PostedListener(JdbcTemplate jdbc, NotificationStub notifications, MeterRegistry meters) {
+    PostedListener(JdbcTemplate jdbc, PostedNotifier notifications, MeterRegistry meters) {
         this.jdbc = jdbc;
         this.notifications = notifications;
         this.meters = meters;
@@ -55,7 +55,7 @@ class PostedListener {
         if (!created.isEmpty()) {
             endToEnd.record(Duration.between(created.get(0), Instant.now()));
             meters.counter("payments.terminal", "outcome", event.outcome().name()).increment();
-            notifications.notifyOutcome(event);
+            notifications.notifyPosted(event);
         }
     }
 }

@@ -57,7 +57,8 @@ flowchart LR
     VAL --> PGV[(Postgres: validation schema)]
     LED --> PGL[(Postgres: ledger schema)]
     VAL -. tuned only .-> R[(Redis account cache)]
-    GW -. notification stub .-> N[notification]
+    GW -. baseline: blocking webhook call .-> NS[notification-service]
+    LED -->|payments.posted, tuned| NS
 ```
 
 The credit-transfer flow is loosely modelled on ISO 20022 pacs.008 (simplified JSON, not a compliance implementation). Correctness holds in both profiles: idempotent `POST` (deterministic payment identifiers), exactly-once effect on the ledger (a dedup record in the same transaction as the postings), balances that never go negative, and per-debtor ordering by sequence number.
@@ -83,7 +84,7 @@ Results land in `results/<date>_<profile>_<scenario>/` (`result.json`, `summary.
 
 ## Features
 
-- 3 services (gateway, validation, ledger) with the notification service stubbed, on a single Kafka broker with replication factor 1 in KRaft mode, Postgres with Flyway, and Redis for the tuned cache.
+- 4 services (gateway, validation, ledger and a notification service with a webhook simulator), on a single Kafka broker with replication factor 1 in KRaft mode, Postgres with Flyway, and Redis for the tuned cache.
 - Profiles: `baseline` carries common real-world anti-patterns on purpose; `tuned` fixes each numbered finding behind its own flag, one commit per finding.
 - Load scenarios in k6 (smoke, steady stepped arrival rate, spike) and a runner that resets the stack, records the environment, checks the ledger invariants and derives every figure from the database and k6 output.
 - Micrometer metrics, Prometheus, Kafka and Postgres exporters and one provisioned Grafana dashboard.
@@ -101,7 +102,7 @@ Built to the MVP cut in [SPEC.md](SPEC.md) first, then the items SPEC marks Late
 | MVP item | Status | Checked in |
 |---|---|---|
 | Gateway, validation and ledger services | done | services/ |
-| Notification handled (stub or service) | done | NotificationStub or notification-service |
+| Notification handled (stub or service) | done | services/notification-service |
 | Kafka broker(s) defined in compose | done | docker-compose.yml |
 | Baseline anti-patterns kept behind default-off tuning flags | done | base *.yml flags |
 | F-01 tuned implementation | done | gateway and ledger tuned config; async publishers |
@@ -124,7 +125,7 @@ Built to the MVP cut in [SPEC.md](SPEC.md) first, then the items SPEC marks Late
 | Item marked Later in SPEC.md | Status | Checked in |
 |---|---|---|
 | F-02 producer idempotence, acks and in-flight | done | *-baseline.yml, *-tuned.yml |
-| F-05 blocking notification call replaced by a hand-off (notification-service) | not built | services/notification-service |
+| F-05 blocking notification call replaced by a hand-off (notification-service) | done | services/notification-service |
 | F-09 serialization and INFO logging | done | lab.tuning.f09 |
 | F-10 JVM sizing, GC choice and virtual threads | not built | lab.tuning.f10 |
 | F-11 hot settlement account | not built | lab.tuning.f11 |
@@ -136,7 +137,7 @@ Built to the MVP cut in [SPEC.md](SPEC.md) first, then the items SPEC marks Late
 | PDF export of the reports | not built | scripts/export_pdf.js |
 | Reusable report template folder | not built | report/template/ |
 
-Not built (marked Later in SPEC.md): F-05 blocking notification call replaced by a hand-off (notification-service); F-10 JVM sizing, GC choice and virtual threads; F-11 hot settlement account; Soak scenario; Gatling scenarios; Distributed tracing to Jaeger; JFR recordings and flame graphs; PDF export of the reports; Reusable report template folder.
+Not built (marked Later in SPEC.md): F-10 JVM sizing, GC choice and virtual threads; F-11 hot settlement account; Soak scenario; Gatling scenarios; Distributed tracing to Jaeger; JFR recordings and flame graphs; PDF export of the reports; Reusable report template folder.
 
 Known gaps in what was built: no load shedding on the gateway outbox backlog; some results predate the per-stage metric snapshots (consumer lag, CPU, garbage collection, connection pools, locks), so those runs have none stored; FX rates are cached in process rather than in Redis; connection-pool sizes are unswept lab choices; the cache accepts bounded staleness (a blocked account can be approved until its cached copy is invalidated or expires).
 

@@ -45,7 +45,8 @@ flowchart LR
     VAL --> PGV[(Postgres: validation schema)]
     LED --> PGL[(Postgres: ledger schema)]
     VAL -. tuned only .-> R[(Redis account cache)]
-    GW -. notification stub .-> N[notification]
+    GW -. baseline: blocking webhook call .-> NS[notification-service]
+    LED -->|payments.posted, tuned| NS
 ```
 
 The credit-transfer flow is loosely modelled on ISO 20022 pacs.008 (simplified JSON, not a compliance implementation). Correctness holds in both profiles: idempotent `POST` (deterministic payment identifiers), exactly-once effect on the ledger (a dedup record in the same transaction as the postings), balances that never go negative, and per-debtor ordering by sequence number.
@@ -71,7 +72,7 @@ Results land in `results/<date>_<profile>_<scenario>/` (`result.json`, `summary.
 
 ## Features
 
-- {{fact.service_count}} services (gateway, validation, ledger) with the notification service stubbed, on {{fact.kafka_topology}} in KRaft mode, Postgres with Flyway, and Redis for the tuned cache.
+- {{fact.service_count}} services (gateway, validation, ledger and a notification service with a webhook simulator), on {{fact.kafka_topology}} in KRaft mode, Postgres with Flyway, and Redis for the tuned cache.
 - Profiles: `baseline` carries common real-world anti-patterns on purpose; `tuned` fixes each numbered finding behind its own flag, one commit per finding.
 - Load scenarios in k6 (smoke, steady stepped arrival rate, spike) and a runner that resets the stack, records the environment, checks the ledger invariants and derives every figure from the database and k6 output.
 - Micrometer metrics, Prometheus, Kafka and Postgres exporters and one provisioned Grafana dashboard.

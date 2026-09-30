@@ -406,7 +406,7 @@ def mvp_status(runs: dict) -> list:
         ("Notification handled (stub or service)",
          exists("services", "payment-gateway", "src", "main", "java", "lab", "payments", "paymentgateway",
                 "NotificationStub.java") or exists("services", "notification-service", "pom.xml"),
-         "NotificationStub or notification-service"),
+         "services/notification-service"),
         ("Kafka broker(s) defined in compose", "\n  kafka" in compose, "docker-compose.yml"),
         ("Baseline anti-patterns kept behind default-off tuning flags", baseline_flags_off, "base *.yml flags"),
     ]

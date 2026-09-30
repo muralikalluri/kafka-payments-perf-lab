@@ -1,6 +1,6 @@
 # Performance audit report (sample deliverable)
 
-**Client:** Larkspur Pay, a fictional payments company. **System:** a credit-transfer pipeline of 3 Spring Boot services, Kafka and Postgres.
+**Client:** Larkspur Pay, a fictional payments company. **System:** a credit-transfer pipeline of 4 Spring Boot services, Kafka and Postgres.
 
 > This is a sample deliverable produced from the lab in this repository. The client, the system and all data are fictional. Every figure below is generated from the committed benchmark results (`results/`) at git revisions `06ce6f4`, `8862be4`, `958b37b`. The report shows the method end to end: baseline, measure, diagnose, fix, re-measure, report. Read section 9 (limits of this evidence) before quoting any number.
 
@@ -72,7 +72,8 @@ flowchart LR
     GW --> PG[(Postgres: gateway schema)]
     VAL --> PGV[(Postgres: validation schema)]
     LED --> PGL[(Postgres: ledger schema)]
-    GW -. notification stub .-> N[notification]
+    GW -. baseline: blocking webhook call .-> NS[notification-service]
+    LED -->|payments.posted, tuned| NS
 ```
 
 A client submits a payment with an idempotency key. The gateway records it, assigns a per-debtor sequence number and publishes `payments.initiated`. Validation checks schema, ownership, status, limits and a sanctions stub, and publishes `payments.validated` for every payment, rejections included. The ledger applies payments once (a dedup record written in the same transaction as the postings), in per-debtor sequence order, with double-entry postings and a balance that cannot go negative. It publishes the outcome on `payments.posted`, and the gateway updates the payment status from that event. One Postgres instance holds a schema per service; no service reads another's schema.
@@ -189,6 +190,7 @@ These are separate from the performance findings: they concern how the system is
 - **Unhandled status updates.** The gateway consumer that records final payment status has no dead-letter handling and there is no dead-letter topic for `payments.posted`. With the framework's default handler a failing status update is retried briefly without delay and then logged and skipped, which would leave the payment shown as accepted indefinitely with no trace except a log line. Recommendation: give this consumer the same retry, dead-letter and alerting treatment as the others.
 - **Schema evolution.** Events carry a schema version and consumers ignore unknown fields, which tolerates additive change. There is no schema registry and no compatibility check, so a renamed or removed field breaks consumers at runtime. Recommendation: a registry or consumer-driven contract tests before the first breaking change.
 - **Delivery semantics.** Delivery is at-least-once everywhere; correctness comes from deterministic identifiers, the ledger's dedup record and monotonic status updates. This is sound and well tested, but it means the service counters count attempts, so they must not be used for business reporting (ADR-0003).
+- **Notification delivery.** In the baseline the gateway calls the client's webhook itself, after the status update has committed. Delivery is therefore at-most-once (a crash or a failed call loses the notification) and a slow webhook delays every later status update on the same consumer thread. The tuned notification service stores each posted event, delivers it with retries and backoff, and relies on the receiver deduplicating by payment identifier, so delivery is at-least-once and effectively once. Webhooks are not ordered; there is one terminal event per payment, so that is harmless.
 - **Tenancy and access.** The client identity is a trusted request header, and the tuned profile adds a token-protected administration endpoint on the service port. Both are lab conveniences, not designs to copy.
 - **Availability.** The recorded runs used a single Kafka broker with replication factor 1 and a single database instance; the database is a lab limit and its failover was not tested. Broker-failure behaviour was not tested in the recorded runs.
 

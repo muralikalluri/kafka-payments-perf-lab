@@ -1,7 +1,10 @@
 lab:
   topics:
     replicas: ${LAB_TOPIC_REPLICAS:1}   # 1 for the single-broker tests; the benchmark runner sets 3 for the compose cluster
+  notification:
+    webhook-url: ${NOTIFICATION_WEBHOOK_URL:http://localhost:8083/webhooks/{clientId}}
   tuning:
+    f05: false   # F-05: blocking webhook call in the posted listener (tuned: notification-service consumes payments.posted)
     f09: false   # F-09: shared ObjectMapper and identifier-only debug logs (baseline: mapper per message, full payloads at INFO)
     f07: false   # F-07: gateway writes an outbox row instead of sending to Kafka inside the transaction
     f01: false   # F-01: async producer sends with callbacks (baseline: synchronous send().get())

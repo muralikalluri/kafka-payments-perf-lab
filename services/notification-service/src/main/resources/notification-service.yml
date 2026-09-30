@@ -1,0 +1,48 @@
+spring:
+  application:
+    name: notification-service
+  profiles:
+    active: ${LAB_PROFILE:baseline}
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5442/payments}
+    username: ${DB_USER:payments}
+    password: ${DB_PASSWORD:change-me-local-only}
+    hikari:
+      schema: notification
+  flyway:
+    locations: classpath:db/notification
+    schemas: notification
+    default-schema: notification
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+    consumer:
+      group-id: notification-service
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+server:
+  port: ${SERVER_PORT:8083}
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  metrics:
+    tags:
+      application: ${spring.application.name}
+lab:
+  topics:
+    replicas: ${LAB_TOPIC_REPLICAS:1}
+  tuning:
+    f05: false   # F-05: this service consumes payments.posted and dispatches (baseline: the gateway calls the webhook itself)
+    f09: false
+  webhook:
+    # The simulated client webhook. Latency and failures are lab parameters (also changeable at run time via /sim/config).
+    latency-ms: ${WEBHOOK_LATENCY_MS:5}
+    failure-rate: ${WEBHOOK_FAILURE_RATE:0}
+    fail-after-accept-rate: ${WEBHOOK_FAIL_AFTER_ACCEPT_RATE:0}
+  notification:
+    max-attempts: 5
+    backoff-base-ms: 500
+    concurrency: 32
+    poll-ms: 50

@@ -8,6 +8,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.function.BooleanSupplier;
 import lab.payments.ledgerservice.LedgerServiceApplication;
+import lab.payments.notificationservice.NotificationServiceApplication;
 import lab.payments.paymentgateway.PaymentGatewayApplication;
 import lab.payments.validationservice.ValidationServiceApplication;
 import java.time.Duration;
@@ -37,6 +38,8 @@ final class Lab {
             new org.testcontainers.containers.GenericContainer<>("redis:7").withExposedPorts(6379);
     static final KafkaContainer KAFKA = new KafkaContainer("apache/kafka:3.8.0");
     static final JdbcTemplate JDBC;
+    static final ConfigurableApplicationContext NOTIFICATION;
+    static final int NOTIFICATION_PORT;
     static final ConfigurableApplicationContext GATEWAY;
     static final ConfigurableApplicationContext VALIDATION;
     static final ConfigurableApplicationContext LEDGER;
@@ -52,8 +55,13 @@ final class Lab {
             REDIS.start();
         }
         System.setProperty("LAB_PROFILE", PROFILE);
+        // Fast retries so a failing webhook reaches its final state within a test.
+        NOTIFICATION = start(NotificationServiceApplication.class, NotificationServiceApplication.CONFIG_NAME,
+                "--lab.notification.backoff-base-ms=50", "--lab.notification.max-attempts=3");
+        NOTIFICATION_PORT = Integer.parseInt(NOTIFICATION.getEnvironment().getProperty("local.server.port"));
         GATEWAY = start(PaymentGatewayApplication.class,
-                PaymentGatewayApplication.CONFIG_NAME);
+                PaymentGatewayApplication.CONFIG_NAME,
+                "--lab.notification.webhook-url=http://localhost:" + NOTIFICATION_PORT + "/webhooks/{clientId}");
         VALIDATION = start(ValidationServiceApplication.class,
                 ValidationServiceApplication.CONFIG_NAME);
         LEDGER = start(LedgerServiceApplication.class,
@@ -77,13 +85,14 @@ final class Lab {
                 .GET().build()).body();
     }
 
-    private static ConfigurableApplicationContext start(Class<?> app, String configName) {
+    private static ConfigurableApplicationContext start(Class<?> app, String configName, String... extra) {
         List<String> args = new java.util.ArrayList<>(List.of(
                 "--server.port=0",
                 "--spring.datasource.url=" + POSTGRES.getJdbcUrl(),
                 "--spring.datasource.username=" + POSTGRES.getUsername(),
                 "--spring.datasource.password=" + POSTGRES.getPassword(),
                 "--spring.kafka.bootstrap-servers=" + KAFKA.getBootstrapServers()));
+        args.addAll(List.of(extra));
         if (REDIS.isRunning()) {
             args.add("--spring.data.redis.host=" + REDIS.getHost());
             args.add("--spring.data.redis.port=" + REDIS.getMappedPort(6379));
@@ -265,6 +274,18 @@ final class Lab {
     /** Postings written per applied payment: the two customer legs (F-11 adds two settlement legs, see there). */
     static int postingsPerPayment() {
         return 2;
+    }
+
+    /** Changes the webhook simulator's behaviour; null leaves a setting as it is. */
+    static void simulate(Long latencyMs, Double failureRate, Double failAfterAcceptRate) {
+        String body = String.format(java.util.Locale.ROOT, "{\"latencyMs\":%s,\"failureRate\":%s,\"failAfterAcceptRate\":%s}",
+                latencyMs, failureRate, failAfterAcceptRate);
+        send(HttpRequest.newBuilder(URI.create("http://localhost:" + NOTIFICATION_PORT + "/sim/config"))
+                .header("Content-Type", "application/json").PUT(HttpRequest.BodyPublishers.ofString(body)).build());
+    }
+
+    static void resetSimulator() {
+        simulate(5L, 0.0, 0.0);
     }
 
     static boolean tuned() {

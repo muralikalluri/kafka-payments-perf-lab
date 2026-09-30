@@ -27,6 +27,7 @@
     <module>services/payment-gateway</module>
     <module>services/validation-service</module>
     <module>services/ledger-service</module>
+    <module>services/notification-service</module>
     <module>services/e2e-tests</module>
   </modules>
 
