@@ -191,4 +191,29 @@ class LedgerInvariantTest {
         assertThat(Lab.count("SELECT count(*) FROM ledger.pending_payments WHERE debtor_account_id = ?", debtor)).isZero();
         assertThat(balance(debtor)).isEqualTo(1000 - 10 - 5);
     }
+
+    /**
+     * Draining a parked payment whose creditor sorts BEFORE the debtor must not take a lock out of
+     * order (the drain used to lock the creditor after the debtor row lock was already held).
+     */
+    @Test
+    void drainWithCreditorSortingBeforeDebtorAppliesAndUnlocksInOrder() {
+        String debtor = "T-z" + UUID.randomUUID().toString().substring(0, 10);
+        String earlyCreditor = "T-a" + UUID.randomUUID().toString().substring(0, 10);
+        String otherCreditor = "T-m" + UUID.randomUUID().toString().substring(0, 10);
+        Lab.ledgerAccount(debtor, CLIENT, 1000);
+        Lab.ledgerAccount(earlyCreditor, CLIENT, 0);
+        Lab.ledgerAccount(otherCreditor, CLIENT, 0);
+        UUID second = UUID.randomUUID();
+        UUID first = UUID.randomUUID();
+
+        Lab.produce(Topics.VALIDATED, "MER-2", Json.write(validated(second, UUID.randomUUID(), debtor, earlyCreditor, 20, 2)));
+        Lab.await("seq 2 parked", () -> Lab.count("SELECT count(*) FROM ledger.pending_payments WHERE debtor_account_id = ?", debtor) == 1);
+        Lab.produce(Topics.VALIDATED, "MER-1", Json.write(validated(first, UUID.randomUUID(), debtor, otherCreditor, 10, 1)));
+        Lab.await("both applied", () -> Lab.count("SELECT count(*) FROM ledger.ledger_payments WHERE debtor_account_id = ?", debtor) == 2);
+
+        assertThat(balance(earlyCreditor)).isEqualTo(20);
+        assertThat(balance(otherCreditor)).isEqualTo(10);
+        assertThat(balance(debtor)).isEqualTo(970);
+    }
 }

@@ -1,8 +1,11 @@
 package lab.payments.ledgerservice;
 
 import io.micrometer.core.instrument.MeterRegistry;
+import java.sql.Array;
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
 import lab.payments.common.Ids;
 import lab.payments.common.Json;
 import lab.payments.common.PaymentPosted;
@@ -41,9 +44,16 @@ public class LedgerService {
             long dailyLimit, long lastSeq) {
     }
 
+    /** A parked payment's creditor appeared after the lock set was chosen; retry with a larger set. */
+    static class LockSetChangedException extends RuntimeException {
+        LockSetChangedException() {
+            super("pending payments changed while locking; retrying with a larger lock set");
+        }
+    }
+
     @Transactional
     public void handle(PaymentValidated e) {
-        lockOrdered(e.debtorAccountId(), e.creditorAccountId());
+        lockDebtorSet(e.debtorAccountId(), e.creditorAccountId());
         if (exists(e)) {
             // Duplicate delivery: outcome already recorded and queued in the outbox. It may still
             // carry a fresh sequence number (client retry after a failed gateway commit), which
@@ -128,7 +138,7 @@ public class LedgerService {
             jdbc.update("DELETE FROM pending_payments WHERE debtor_account_id = ? AND debtor_seq = ?",
                     debtorId, next);
             PaymentValidated pe = Json.read(parked.get(0), PaymentValidated.class);
-            lockOrdered(pe.debtorAccountId(), pe.creditorAccountId());
+            // No locking here: every creditor of a parked payment is already in the lock set.
             if (exists(pe)) {
                 jdbc.update("UPDATE accounts SET last_seq = ? WHERE id = ?", pe.debtorSeq(), debtorId);
             } else {
@@ -166,8 +176,38 @@ public class LedgerService {
         return n != null && n > 0;
     }
 
-    private void lockOrdered(String a, String b) {
-        jdbc.query("SELECT id FROM accounts WHERE id IN (?, ?) ORDER BY id FOR UPDATE", rs -> { }, a, b);
+    /**
+     * Locks the debtor, the creditor and the creditors of every payment parked for this debtor, in
+     * one statement ordered by id. Draining parked payments then never takes a lock out of order,
+     * so opposite transfers and drains cannot deadlock with each other. The parked set can only
+     * change under the debtor's lock, so it is re-read once the lock is held.
+     */
+    private void lockDebtorSet(String debtor, String creditor) {
+        Set<String> ids = new TreeSet<>(Set.of(debtor, creditor));
+        ids.addAll(pendingCreditors(debtor));
+        lockAll(ids);
+        if (!ids.containsAll(pendingCreditors(debtor))) {
+            throw new LockSetChangedException();
+        }
+    }
+
+    private Set<String> pendingCreditors(String debtor) {
+        Set<String> creditors = new TreeSet<>();
+        for (String payload : jdbc.query(
+                "SELECT payload FROM pending_payments WHERE debtor_account_id = ?",
+                (rs, i) -> rs.getString(1), debtor)) {
+            creditors.add(Json.read(payload, PaymentValidated.class).creditorAccountId());
+        }
+        return creditors;
+    }
+
+    private void lockAll(Set<String> ids) {
+        jdbc.query(con -> {
+            var ps = con.prepareStatement("SELECT id FROM accounts WHERE id = ANY(?) ORDER BY id FOR UPDATE");
+            Array array = con.createArrayOf("text", ids.toArray());
+            ps.setArray(1, array);
+            return ps;
+        }, rs -> { });
     }
 
     private Account account(String id) {
