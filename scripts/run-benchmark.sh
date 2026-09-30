@@ -4,6 +4,8 @@
 # Scenario knobs (env): STEPS, STEP_SECONDS (steady); BASE_RATE, WARM_SECONDS, BURST_SECONDS,
 # RECOVER_SECONDS (spike). They are recorded in result.json. RUN_SUFFIX appends to the results folder name.
 # BENCH_CHAOS_CMD is an optional shell command run in the background during the load (fault injection).
+# BENCH_SERVICE_ENV is an optional space-separated list of NAME=value settings for the services, used for ablation runs,
+# for example BENCH_SERVICE_ENV=LAB_TUNING_F11=false switches one tuned finding off (Spring maps it to lab.tuning.f11).
 set -euo pipefail
 
 # A machine that sleeps mid-run produces invalid timings (and can stall the run), so hold a
@@ -56,8 +58,9 @@ $COMPOSE up -d --wait --wait-timeout 240 >/dev/null
 
 echo "==> start services (profile: $PROFILE)"
 for s in $SERVICES; do
-  LAB_TOPIC_REPLICAS="${LAB_TOPIC_REPLICAS:-3}" KAFKA_BOOTSTRAP="${KAFKA_BOOTSTRAP:-localhost:9092,localhost:9094,localhost:9096}" \
-  LAB_PROFILE="$PROFILE" nohup java -jar "services/$s/target/$s-0.1.0-SNAPSHOT-exec.jar" \
+  env ${BENCH_SERVICE_ENV:-} LAB_TOPIC_REPLICAS="${LAB_TOPIC_REPLICAS:-3}" \
+    KAFKA_BOOTSTRAP="${KAFKA_BOOTSTRAP:-localhost:9092,localhost:9094,localhost:9096}" \
+    LAB_PROFILE="$PROFILE" nohup java -jar "services/$s/target/$s-0.1.0-SNAPSHOT-exec.jar" \
     > "$RUN_DIR/raw/$s.log" 2>&1 &
   PIDS="$PIDS $!"
 done
@@ -86,6 +89,7 @@ echo "==> environment"
     echo "cpu_cores=$(nproc)"
     echo "ram_bytes=$(awk '/MemTotal/ {print $2*1024}' /proc/meminfo)"
   fi
+  echo "ablation=${BENCH_SERVICE_ENV:-none}"
   echo "kafka_brokers=$($COMPOSE ps --services | grep -c '^kafka-[0-9]')"
   echo "webhook_latency_ms=${WEBHOOK_LATENCY_MS:-5} webhook_failure_rate=${WEBHOOK_FAILURE_RATE:-0}"
   echo "docker_vm=$(docker info --format 'cpus={{.NCPU}} mem_bytes={{.MemTotal}}')"

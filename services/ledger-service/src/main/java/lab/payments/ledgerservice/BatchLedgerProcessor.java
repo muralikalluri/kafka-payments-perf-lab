@@ -79,9 +79,11 @@ class BatchLedgerProcessor {
     private final MeterRegistry meters;
     private final TransactionTemplate tx;
     private final boolean keyByDebtor;
+    private final SettlementAccounts settlement;
 
     BatchLedgerProcessor(JdbcTemplate jdbc, MeterRegistry meters, TransactionTemplate tx,
-            @Value("${lab.tuning.f12:false}") boolean keyByDebtor) {
+            @Value("${lab.tuning.f12:false}") boolean keyByDebtor, SettlementAccounts settlement) {
+        this.settlement = settlement;
         this.jdbc = jdbc;
         this.meters = meters;
         this.tx = tx;
@@ -89,13 +91,15 @@ class BatchLedgerProcessor {
         meters.counter("ledger.parked");
     }
 
-    void process(List<PaymentValidated> events) {
-        tx.executeWithoutResult(status -> new Run(events).execute());
+    /** @param shardHint the source partition of the batch: it picks the settlement shard when F-11 is on */
+    void process(List<PaymentValidated> events, int shardHint) {
+        tx.executeWithoutResult(status -> new Run(events, shardHint).execute());
     }
 
     /** All mutable state of one batch. */
     private final class Run {
         private final List<PaymentValidated> events;
+        private final int shardHint;
         private final Map<String, Acct> accts = new HashMap<>();
         private Map<String, TreeMap<Long, PaymentValidated>> pending;
         private final Set<UUID> seen = new HashSet<>();
@@ -106,8 +110,9 @@ class BatchLedgerProcessor {
         private final List<PendingRow> pendingInserts = new ArrayList<>();
         private final List<PendingRow> pendingDeletes = new ArrayList<>();
 
-        Run(List<PaymentValidated> events) {
+        Run(List<PaymentValidated> events, int shardHint) {
             this.events = events;
+            this.shardHint = shardHint;
         }
 
         void execute() {
@@ -119,13 +124,19 @@ class BatchLedgerProcessor {
             Set<String> debtors = byDebtor.keySet();
 
             Set<String> ids = new TreeSet<>(debtors);
-            events.forEach(e -> ids.add(e.creditorAccountId()));
-            loadPending(debtors).values().forEach(m -> m.values().forEach(p -> ids.add(p.creditorAccountId())));
+            events.forEach(e -> {
+                ids.add(e.creditorAccountId());
+                ids.add(settlement.id(e.currency(), shardHint));
+            });
+            loadPending(debtors).values().forEach(m -> m.values().forEach(p -> {
+                ids.add(p.creditorAccountId());
+                ids.add(settlement.id(p.currency(), shardHint));
+            }));
             lockAndLoad(ids);
             pending = loadPending(debtors);
             for (TreeMap<Long, PaymentValidated> parked : pending.values()) {
                 for (PaymentValidated p : parked.values()) {
-                    if (!ids.contains(p.creditorAccountId())) {
+                    if (!ids.contains(p.creditorAccountId()) || !ids.contains(settlement.id(p.currency(), shardHint))) {
                         throw new LedgerService.LockSetChangedException();
                     }
                 }
@@ -144,6 +155,11 @@ class BatchLedgerProcessor {
             Acct debtor = accts.get(e.debtorAccountId());
             if (seen.contains(e.paymentId())) {
                 duplicate(e, debtor);
+                return;
+            }
+            if (SettlementAccounts.isReserved(e.debtorAccountId())) {
+                // See LedgerService: a reserved debtor has no sequence to consume; a reserved creditor does.
+                record(e, PaymentPosted.Outcome.REJECTED, "RESERVED_ACCOUNT");
                 return;
             }
             if (debtor == null) {
@@ -204,15 +220,20 @@ class BatchLedgerProcessor {
 
         private void apply(PaymentValidated e, Acct debtor) {
             Acct creditor = accts.get(e.creditorAccountId());
+            Acct settle = accts.get(settlement.id(e.currency(), shardHint));
             String reason = null;
             if (e.outcome() == PaymentValidated.Outcome.REJECTED) {
                 reason = e.reasonCode();
             } else if (creditor == null) {
                 reason = "CREDITOR_NOT_FOUND";
+            } else if (SettlementAccounts.isReserved(creditor.id)) {
+                reason = "RESERVED_ACCOUNT";
             } else if (debtor.id.equals(creditor.id)) {
                 reason = "SAME_ACCOUNT";
             } else if (!debtor.currency.equals(e.currency()) || !creditor.currency.equals(e.currency())) {
                 reason = "CURRENCY_MISMATCH";
+            } else if (settle == null) {
+                reason = "SETTLEMENT_ACCOUNT_MISSING";
             } else if (!debtor.overdraft && debtor.balance < e.amountMinor()) {
                 reason = "INSUFFICIENT_FUNDS";
             } else if (outflow.getOrDefault(debtor.id, 0L) + e.amountMinor() > debtor.dailyLimit) {
@@ -220,9 +241,16 @@ class BatchLedgerProcessor {
             }
             record(e, reason == null ? PaymentPosted.Outcome.POSTED : PaymentPosted.Outcome.REJECTED, reason);
             if (reason == null) {
+                // Four legs through settlement (F-11); the credit is posted before the debit, and the account is
+                // written back even though it nets to zero, exactly as the record path updates the row twice.
                 postings.add(new PostingRow(e.paymentId(), debtor.id, "D", e.amountMinor()));
+                postings.add(new PostingRow(e.paymentId(), settle.id, "C", e.amountMinor()));
+                postings.add(new PostingRow(e.paymentId(), settle.id, "D", e.amountMinor()));
                 postings.add(new PostingRow(e.paymentId(), creditor.id, "C", e.amountMinor()));
                 debtor.balance -= e.amountMinor();
+                settle.balance += e.amountMinor();
+                settle.balance -= e.amountMinor();
+                settle.touched = true;
                 creditor.balance += e.amountMinor();
                 creditor.touched = true;
                 outflow.merge(debtor.id, e.amountMinor(), Long::sum);

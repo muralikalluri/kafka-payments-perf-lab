@@ -8,6 +8,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.kafka.support.KafkaHeaders;
+import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.stereotype.Component;
 
 /** Baseline (F-04 anti-pattern): one record, one transaction. Replaced by BatchValidatedListener when tuned. */
@@ -27,10 +29,10 @@ class ValidatedListener {
 
     /** The offset is committed only after the DB transaction commits (default BATCH ack). */
     @KafkaListener(topics = Topics.VALIDATED)
-    void onValidated(String payload) {
+    void onValidated(String payload, @Header(KafkaHeaders.RECEIVED_PARTITION) int partition) {
         PaymentValidated event = Json.read(payload, PaymentValidated.class);
         EventLog.event(log, "payment validated", event.paymentId().toString(), () -> payload); // F-09
-        ledger.handle(event);
+        ledger.handle(event, partition);
         outbox.flush();
     }
 }

@@ -63,7 +63,7 @@ class BatchValidatedListener {
             return;
         }
         try {
-            processWithRetry(parsed.stream().map(Parsed::event).toList());
+            processWithRetry(parsed.stream().map(Parsed::event).toList(), parsed.get(0).record().partition());
         } catch (InterruptedException e) {
             throw e;
         } catch (RuntimeException batchFailure) {
@@ -71,7 +71,7 @@ class BatchValidatedListener {
                     parsed.size(), batchFailure.toString());
             for (Parsed p : parsed) {
                 try {
-                    processWithRetry(List.of(p.event()));
+                    processWithRetry(List.of(p.event()), p.record().partition());
                 } catch (RuntimeException recordFailure) {
                     deadLetter(p.record(), "failed: " + recordFailure);
                 }
@@ -79,11 +79,11 @@ class BatchValidatedListener {
         }
     }
 
-    private void processWithRetry(List<PaymentValidated> events) throws InterruptedException {
+    private void processWithRetry(List<PaymentValidated> events, int shardHint) throws InterruptedException {
         long delayMs = 200;
         while (true) {
             try {
-                processor.process(events);
+                processor.process(events, shardHint);
                 return;
             } catch (RuntimeException e) {
                 if (!isTransient(e)) {

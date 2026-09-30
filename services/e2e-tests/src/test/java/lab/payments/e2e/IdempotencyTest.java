@@ -47,7 +47,7 @@ class IdempotencyTest {
         Lab.await("payment terminal", () -> Lab.count(
                 "SELECT count(*) FROM gateway.payments WHERE payment_id = ? AND status_rank = 3", paymentId) == 1);
         assertThat(Lab.count("SELECT count(*) FROM ledger.ledger_payments WHERE payment_id = ?", paymentId)).isEqualTo(1);
-        assertThat(Lab.count("SELECT count(*) FROM ledger.postings WHERE payment_id = ?", paymentId)).isEqualTo(2);
+        assertThat(Lab.count("SELECT count(*) FROM ledger.postings WHERE payment_id = ?", paymentId)).isEqualTo(Lab.postingsPerPayment());
     }
 
     /** T2 + input validation + tenant isolation on reads (T11 part). */

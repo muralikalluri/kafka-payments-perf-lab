@@ -35,10 +35,12 @@ public class LedgerService {
 
     private final MeterRegistry meters;
     private final boolean keyByDebtor;
+    private final SettlementAccounts settlement;
 
     public LedgerService(JdbcTemplate jdbc, MeterRegistry meters,
-            @Value("${lab.tuning.f12:false}") boolean keyByDebtor) {
+            @Value("${lab.tuning.f12:false}") boolean keyByDebtor, SettlementAccounts settlement) {
         this.keyByDebtor = keyByDebtor;
+        this.settlement = settlement;
         this.jdbc = jdbc;
         this.meters = meters;
         meters.counter("ledger.parked"); // export 0 from startup so dashboards show a series
@@ -55,14 +57,21 @@ public class LedgerService {
         }
     }
 
+    /** @param shardHint the source partition: it picks the settlement shard when F-11 is on */
     @Transactional
-    public void handle(PaymentValidated e) {
-        lockDebtorSet(e.debtorAccountId(), e.creditorAccountId());
+    public void handle(PaymentValidated e, int shardHint) {
+        lockDebtorSet(e.debtorAccountId(), e.creditorAccountId(), e.currency(), shardHint);
         if (exists(e)) {
             // Duplicate delivery: outcome already recorded and queued in the outbox. It may still
             // carry a fresh sequence number (client retry after a failed gateway commit), which
             // must be consumed or the debtor's later payments would park forever.
-            sequenceForDuplicate(e);
+            sequenceForDuplicate(e, shardHint);
+            return;
+        }
+        if (SettlementAccounts.isReserved(e.debtorAccountId())) {
+            // Not a customer account: it has no sequence to consume, so it can be rejected outright. (A reserved
+            // CREDITOR must go through the normal sequence flow, or its debtor would wait for the number forever.)
+            record(e, PaymentPosted.Outcome.REJECTED, "RESERVED_ACCOUNT");
             return;
         }
         Account debtor = account(e.debtorAccountId());
@@ -81,11 +90,11 @@ public class LedgerService {
             record(e, PaymentPosted.Outcome.REJECTED, "SEQUENCE_CONFLICT");
             return;
         }
-        apply(e);
-        drain(e.debtorAccountId());
+        apply(e, shardHint);
+        drain(e.debtorAccountId(), shardHint);
     }
 
-    private void sequenceForDuplicate(PaymentValidated e) {
+    private void sequenceForDuplicate(PaymentValidated e, int shardHint) {
         Account debtor = account(e.debtorAccountId());
         if (debtor == null) {
             return;
@@ -93,24 +102,30 @@ public class LedgerService {
         long expected = debtor.lastSeq() + 1;
         if (e.debtorSeq() == expected) {
             jdbc.update("UPDATE accounts SET last_seq = ? WHERE id = ?", e.debtorSeq(), debtor.id());
-            drain(debtor.id());
+            drain(debtor.id(), shardHint);
         } else if (e.debtorSeq() > expected) {
             park(e);
         } // else: plain redelivery of an already-sequenced event, nothing to do
     }
 
-    private void apply(PaymentValidated e) {
+    private void apply(PaymentValidated e, int shardHint) {
         Account debtor = account(e.debtorAccountId());
         Account creditor = account(e.creditorAccountId());
+        String settleId = settlement.id(e.currency(), shardHint);
+        Account settle = account(settleId);
         String reason = null;
         if (e.outcome() == PaymentValidated.Outcome.REJECTED) {
             reason = e.reasonCode();
         } else if (creditor == null) {
             reason = "CREDITOR_NOT_FOUND";
+        } else if (SettlementAccounts.isReserved(creditor.id())) {
+            reason = "RESERVED_ACCOUNT";
         } else if (debtor.id().equals(creditor.id())) {
             reason = "SAME_ACCOUNT";
         } else if (!debtor.currency().equals(e.currency()) || !creditor.currency().equals(e.currency())) {
             reason = "CURRENCY_MISMATCH";
+        } else if (settle == null) {
+            reason = "SETTLEMENT_ACCOUNT_MISSING";
         } else if (!debtor.overdraft() && debtor.balance() < e.amountMinor()) {
             reason = "INSUFFICIENT_FUNDS";
         } else if (outflowToday(debtor.id()) + e.amountMinor() > debtor.dailyLimit()) {
@@ -118,19 +133,26 @@ public class LedgerService {
         }
         record(e, reason == null ? PaymentPosted.Outcome.POSTED : PaymentPosted.Outcome.REJECTED, reason);
         if (reason == null) {
-            jdbc.update("INSERT INTO postings(payment_id, account_id, direction, amount_minor) VALUES (?,?,'D',?)",
-                    e.paymentId(), debtor.id(), e.amountMinor());
-            jdbc.update("INSERT INTO postings(payment_id, account_id, direction, amount_minor) VALUES (?,?,'C',?)",
-                    e.paymentId(), creditor.id(), e.amountMinor());
-            jdbc.update("UPDATE accounts SET balance_minor = balance_minor - ? WHERE id = ?",
-                    e.amountMinor(), debtor.id());
-            jdbc.update("UPDATE accounts SET balance_minor = balance_minor + ? WHERE id = ?",
-                    e.amountMinor(), creditor.id());
+            // Four legs through settlement (F-11): debtor -> settlement -> creditor. The settlement credit is posted
+            // before its debit so the balance never dips below zero (the CHECK constraint is per statement).
+            post(e, debtor.id(), "D");
+            post(e, settleId, "C");
+            post(e, settleId, "D");
+            post(e, creditor.id(), "C");
+            jdbc.update("UPDATE accounts SET balance_minor = balance_minor - ? WHERE id = ?", e.amountMinor(), debtor.id());
+            jdbc.update("UPDATE accounts SET balance_minor = balance_minor + ? WHERE id = ?", e.amountMinor(), settleId);
+            jdbc.update("UPDATE accounts SET balance_minor = balance_minor - ? WHERE id = ?", e.amountMinor(), settleId);
+            jdbc.update("UPDATE accounts SET balance_minor = balance_minor + ? WHERE id = ?", e.amountMinor(), creditor.id());
         }
         jdbc.update("UPDATE accounts SET last_seq = ? WHERE id = ?", e.debtorSeq(), debtor.id());
     }
 
-    private void drain(String debtorId) {
+    private void post(PaymentValidated e, String accountId, String direction) {
+        jdbc.update("INSERT INTO postings(payment_id, account_id, direction, amount_minor) VALUES (?,?,?,?)",
+                e.paymentId(), accountId, direction, e.amountMinor());
+    }
+
+    private void drain(String debtorId, int shardHint) {
         while (true) {
             long next = account(debtorId).lastSeq() + 1;
             List<String> parked = jdbc.query(
@@ -146,7 +168,7 @@ public class LedgerService {
             if (exists(pe)) {
                 jdbc.update("UPDATE accounts SET last_seq = ? WHERE id = ?", pe.debtorSeq(), debtorId);
             } else {
-                apply(pe);
+                apply(pe, shardHint);
             }
         }
     }
@@ -186,23 +208,30 @@ public class LedgerService {
      * so opposite transfers and drains cannot deadlock with each other. The parked set can only
      * change under the debtor's lock, so it is re-read once the lock is held.
      */
-    private void lockDebtorSet(String debtor, String creditor) {
-        Set<String> ids = new TreeSet<>(Set.of(debtor, creditor));
-        ids.addAll(pendingCreditors(debtor));
+    private void lockDebtorSet(String debtor, String creditor, String currency, int shardHint) {
+        // Not Set.of: the ids can coincide (same account twice, or a reserved settlement account), and Set.of rejects duplicates.
+        Set<String> ids = new TreeSet<>();
+        ids.add(debtor);
+        ids.add(creditor);
+        ids.add(settlement.id(currency, shardHint));
+        ids.addAll(pendingLockIds(debtor, shardHint));
         lockAll(ids);
-        if (!ids.containsAll(pendingCreditors(debtor))) {
+        if (!ids.containsAll(pendingLockIds(debtor, shardHint))) {
             throw new LockSetChangedException();
         }
     }
 
-    private Set<String> pendingCreditors(String debtor) {
-        Set<String> creditors = new TreeSet<>();
+    /** Creditors and settlement accounts that draining this debtor's parked payments would need. */
+    private Set<String> pendingLockIds(String debtor, int shardHint) {
+        Set<String> ids = new TreeSet<>();
         for (String payload : jdbc.query(
                 "SELECT payload FROM pending_payments WHERE debtor_account_id = ?",
                 (rs, i) -> rs.getString(1), debtor)) {
-            creditors.add(Json.read(payload, PaymentValidated.class).creditorAccountId());
+            PaymentValidated parked = Json.read(payload, PaymentValidated.class);
+            ids.add(parked.creditorAccountId());
+            ids.add(settlement.id(parked.currency(), shardHint));
         }
-        return creditors;
+        return ids;
     }
 
     private void lockAll(Set<String> ids) {

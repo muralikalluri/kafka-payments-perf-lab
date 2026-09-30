@@ -1,7 +1,11 @@
 lab:
   topics:
     replicas: ${LAB_TOPIC_REPLICAS:1}   # 1 for the single-broker tests; the benchmark runner sets 3 for the compose cluster
+  settlement:
+    shards: 16          # F-11: settlement shard accounts available when sharding is on
+    reconcile-ms: 10000
   tuning:
+    f11: false   # F-11: shard the settlement account (baseline: one settlement row locked by every payment)
     f09: false   # F-09: shared ObjectMapper and identifier-only debug logs (baseline: mapper per message, full payloads at INFO)
     f01: false   # F-01: async producer sends with callbacks (baseline: synchronous send().get())
     f04: false   # F-04: batch listener + JDBC batch writes (baseline: one record, one transaction)

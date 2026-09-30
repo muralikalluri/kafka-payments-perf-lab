@@ -139,7 +139,7 @@ class LedgerInvariantTest {
         Lab.produce(Topics.VALIDATED, "MER-1", Json.write(validated(sentinel, UUID.randomUUID(), debtor, creditor, 1, 2)));
         Lab.await("sentinel applied", () -> Lab.count("SELECT count(*) FROM ledger.ledger_payments WHERE payment_id = ?", sentinel) == 1);
 
-        assertThat(Lab.count("SELECT count(*) FROM ledger.postings WHERE payment_id = ?", paymentId)).isEqualTo(2);
+        assertThat(Lab.count("SELECT count(*) FROM ledger.postings WHERE payment_id = ?", paymentId)).isEqualTo(Lab.postingsPerPayment());
         assertThat(balance(debtor)).isEqualTo(1000 - 250 - 1);
         assertThat(balance(creditor)).isEqualTo(250 + 1);
     }
@@ -187,7 +187,7 @@ class LedgerInvariantTest {
 
         Lab.await("payment behind the duplicate applied", () -> Lab.count(
                 "SELECT count(*) FROM ledger.ledger_payments WHERE payment_id = ?", p3) == 1);
-        assertThat(Lab.count("SELECT count(*) FROM ledger.postings WHERE payment_id = ?", p1)).isEqualTo(2);
+        assertThat(Lab.count("SELECT count(*) FROM ledger.postings WHERE payment_id = ?", p1)).isEqualTo(Lab.postingsPerPayment());
         assertThat(Lab.count("SELECT count(*) FROM ledger.pending_payments WHERE debtor_account_id = ?", debtor)).isZero();
         assertThat(balance(debtor)).isEqualTo(1000 - 10 - 5);
     }
@@ -261,5 +261,25 @@ class LedgerInvariantTest {
         assertThat(total).isEqualTo(6 * 500L);
         assertThat(Lab.recordCount(Topics.VALIDATED + ".DLT") + Lab.recordCount(Topics.INITIATED + ".DLT"))
                 .isEqualTo(dltBefore);
+    }
+
+    /**
+     * An event naming the same account as debtor and creditor (validation would stop it, but events can be produced
+     * directly) is rejected and consumes its sequence number; it must not poison the consumer.
+     */
+    @Test
+    void sameAccountEventIsRejectedWithoutBlockingTheDebtor() {
+        String account = "T-" + UUID.randomUUID().toString().substring(0, 12);
+        String other = "T-" + UUID.randomUUID().toString().substring(0, 12);
+        Lab.ledgerAccount(account, CLIENT, 1000);
+        Lab.ledgerAccount(other, CLIENT, 0);
+        UUID same = UUID.randomUUID();
+        UUID next = UUID.randomUUID();
+        Lab.produce(Topics.VALIDATED, "MER-1", Json.write(validated(same, UUID.randomUUID(), account, account, 10, 1)));
+        Lab.produce(Topics.VALIDATED, "MER-1", Json.write(validated(next, UUID.randomUUID(), account, other, 10, 2)));
+        Lab.await("rejected and the next payment applied", () -> Lab.count(
+                "SELECT count(*) FROM ledger.ledger_payments WHERE (payment_id = ? AND reason_code = 'SAME_ACCOUNT') "
+                        + "OR (payment_id = ? AND outcome = 'POSTED')", same, next) == 2);
+        assertThat(balance(account)).isEqualTo(990);
     }
 }

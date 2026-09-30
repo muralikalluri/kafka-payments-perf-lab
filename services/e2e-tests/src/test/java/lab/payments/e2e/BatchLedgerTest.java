@@ -68,7 +68,7 @@ class BatchLedgerTest {
         List<Long> order = Lab.JDBC.queryForList(
                 "SELECT debtor_seq FROM ledger.ledger_payments WHERE debtor_account_id = ? ORDER BY id", Long.class, a);
         assertThat(order).containsExactly(1L, 2L, 4L); // seq 3 was consumed by the retry, no row
-        assertThat(Lab.count("SELECT count(*) FROM ledger.postings WHERE payment_id = ?", p1)).isEqualTo(2);
+        assertThat(Lab.count("SELECT count(*) FROM ledger.postings WHERE payment_id = ?", p1)).isEqualTo(Lab.postingsPerPayment());
         assertThat(Lab.count("SELECT count(*) FROM ledger.pending_payments WHERE debtor_account_id IN (?, ?)", a, b)).isZero();
         assertThat(balance(a)).isEqualTo(1000 - 10 - 20 - 5 + 7);
         assertThat(balance(b)).isEqualTo(1000 + 10 + 20 + 5 - 7);

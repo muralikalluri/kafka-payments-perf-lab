@@ -46,7 +46,7 @@ class OutboxTest {
         assertThat(Lab.count("SELECT count(*) FROM gateway.payments WHERE idempotency_key = ?", key)).isEqualTo(1);
         Lab.await("terminal after recovery", () -> Lab.count(
                 "SELECT count(*) FROM gateway.payments WHERE payment_id = ? AND status_rank = 3", paymentId) == 1);
-        assertThat(Lab.count("SELECT count(*) FROM ledger.postings WHERE payment_id = ?", paymentId)).isEqualTo(2);
+        assertThat(Lab.count("SELECT count(*) FROM ledger.postings WHERE payment_id = ?", paymentId)).isEqualTo(Lab.postingsPerPayment());
         if (Lab.tuned()) {
             // No phantom events without a broker call inside the transaction.
             assertThat(Lab.count("SELECT count(*) FROM ledger.ledger_payments WHERE reason_code = 'SEQUENCE_CONFLICT'")).isZero();
@@ -77,7 +77,7 @@ class OutboxTest {
                 "SELECT count(*) FROM gateway.payments WHERE payment_id = ? AND status_rank = 3", second) == 1);
 
         assertThat(Lab.count("SELECT count(*) FROM ledger.ledger_payments WHERE payment_id = ?", paymentId)).isEqualTo(1);
-        assertThat(Lab.count("SELECT count(*) FROM ledger.postings WHERE payment_id = ?", paymentId)).isEqualTo(2);
+        assertThat(Lab.count("SELECT count(*) FROM ledger.postings WHERE payment_id = ?", paymentId)).isEqualTo(Lab.postingsPerPayment());
         long balance = Lab.JDBC.queryForObject("SELECT balance_minor FROM ledger.accounts WHERE id = ?", Long.class, debtor);
         assertThat(balance).isEqualTo(1000 - 10 - 7);
     }

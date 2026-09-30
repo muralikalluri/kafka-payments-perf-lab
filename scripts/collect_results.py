@@ -151,17 +151,25 @@ def main():
         "non_terminal_payments": created - terminal,
         "ledger_payments_minus_gateway_payments": int(one("select count(*) from ledger.ledger_payments")[0]) - created,
         "sequence_conflicts": reasons.get("SEQUENCE_CONFLICT", 0),
+        # F-11: settlement is a transit account and must be zero after every commit; every posted payment has four legs.
+        "settlement_nonzero_accounts": int(one(
+            "select count(*) from ledger.accounts where id like 'SETTLE-%' and balance_minor <> 0")[0]),
+        "posted_payments_without_four_legs": int(one("""
+            select count(*) from (select p.payment_id from ledger.ledger_payments p
+              left join ledger.postings s on s.payment_id = p.payment_id
+              where p.outcome = 'POSTED' group by p.payment_id having count(s.id) <> 4) x""")[0]),
     }
     invariants["all_hold"] = (
         invariants["negative_balances"] == 0 and invariants["debits_minus_credits_minor"] == 0
         and invariants["demo_total_balance_minor"] == DEMO_TOTAL_BALANCE_MINOR
         and invariants["pending_rows"] == 0 and invariants["outbox_rows"] == 0
         and invariants["non_terminal_payments"] == 0
-        and invariants["ledger_payments_minus_gateway_payments"] == 0)
+        and invariants["ledger_payments_minus_gateway_payments"] == 0
+        and invariants["settlement_nonzero_accounts"] == 0 and invariants["posted_payments_without_four_legs"] == 0)
 
     overall = e2e_stats()
     result = {
-        "schema_version": 1,
+        "schema_version": 2,
         "profile": a.profile, "scenario": a.scenario,
         "git_sha": subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip(),
         "git_dirty": bool(subprocess.run(["git", "status", "--porcelain", "--", ".", ":(exclude)results"],

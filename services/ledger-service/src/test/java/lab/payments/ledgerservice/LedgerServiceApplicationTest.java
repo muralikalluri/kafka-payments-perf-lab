@@ -31,8 +31,12 @@ class LedgerServiceApplicationTest {
 
     @Test
     void contextLoadsAndAccountsAreSeeded() {
-        Integer accounts = jdbc.queryForObject("SELECT count(*) FROM accounts", Integer.class);
-        assertThat(accounts).isEqualTo(1000);
+        Integer demo = jdbc.queryForObject("SELECT count(*) FROM accounts WHERE id LIKE 'ACC-%'", Integer.class);
+        assertThat(demo).isEqualTo(1000);
+        // F-11: one baseline settlement account plus the shard accounts, all zero and never negative.
+        Integer settlement = jdbc.queryForObject(
+                "SELECT count(*) FROM accounts WHERE id LIKE 'SETTLE-%' AND balance_minor = 0 AND overdraft = false", Integer.class);
+        assertThat(settlement).isEqualTo(17);
     }
 
     /** T9: the CHECK constraint is a backstop even if application code is wrong. */

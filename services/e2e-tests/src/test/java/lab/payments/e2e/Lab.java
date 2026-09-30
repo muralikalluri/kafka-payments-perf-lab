@@ -65,7 +65,7 @@ final class Lab {
         VALIDATION = start(ValidationServiceApplication.class,
                 ValidationServiceApplication.CONFIG_NAME);
         LEDGER = start(LedgerServiceApplication.class,
-                LedgerServiceApplication.CONFIG_NAME);
+                LedgerServiceApplication.CONFIG_NAME, "--lab.settlement.reconcile-ms=500");
         GATEWAY_PORT = port(GATEWAY);
         VALIDATION_PORT = port(VALIDATION);
         LEDGER_PORT = port(LEDGER);
@@ -271,9 +271,9 @@ final class Lab {
         }
     }
 
-    /** Postings written per applied payment: the two customer legs (F-11 adds two settlement legs, see there). */
+    /** Postings per applied payment: debtor -> settlement -> creditor, four legs (F-11; settlement nets to zero). */
     static int postingsPerPayment() {
-        return 2;
+        return 4;
     }
 
     /** Changes the webhook simulator's behaviour; null leaves a setting as it is. */
