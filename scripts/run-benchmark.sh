@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Runs one k6 scenario against one profile from a clean state and writes results/<date>_<profile>_<scenario>/.
-# Usage: ./scripts/run-benchmark.sh <baseline|tuned> <smoke|steady|spike>
+# Usage: ./scripts/run-benchmark.sh <baseline|tuned> <smoke|steady|spike|soak>
 # Scenario knobs (env): STEPS, STEP_SECONDS (steady); BASE_RATE, WARM_SECONDS, BURST_SECONDS,
-# RECOVER_SECONDS (spike). They are recorded in result.json. RUN_SUFFIX appends to the results folder name.
+# RECOVER_SECONDS (spike); SOAK_RATE, SOAK_MINUTES (soak; the rate defaults to 60% of the profile's steady maximum,
+# read from its latest steady result). They are recorded in result.json. RUN_SUFFIX appends to the results folder name.
 # BENCH_CHAOS_CMD is an optional shell command run in the background during the load (fault injection).
 # BENCH_SERVICE_ENV is an optional space-separated list of NAME=value settings for the services, used for ablation runs,
 # for example BENCH_SERVICE_ENV=LAB_TUNING_F11=false switches one tuned finding off (Spring maps it to lab.tuning.f11).
@@ -14,12 +15,11 @@ if [ "$(uname)" = Darwin ] && [ -z "${BENCH_CAFFEINATED:-}" ] && command -v caff
   BENCH_CAFFEINATED=1 exec caffeinate -dimsu "$0" "$@"
 fi
 
-usage() { echo "usage: $0 <baseline|tuned> <smoke|steady|spike>" >&2; exit 2; }
+usage() { echo "usage: $0 <baseline|tuned> <smoke|steady|spike|soak>" >&2; exit 2; }
 PROFILE="${1:-}"; SCENARIO="${2:-}"
 case "$PROFILE" in baseline|tuned) ;; *) usage ;; esac
 case "$SCENARIO" in
-  smoke|steady|spike) ;;
-  soak) echo "soak is marked Later in SPEC.md §12; not implemented." >&2; exit 2 ;;
+  smoke|steady|spike|soak) ;;
   *) usage ;;
 esac
 
@@ -48,6 +48,26 @@ mkdir -p "$RUN_DIR/raw"
 PIDS=""
 cleanup() { for p in $PIDS; do kill "$p" 2>/dev/null || true; done; }
 trap cleanup EXIT
+
+if [ "$SCENARIO" = soak ]; then
+  SOAK_MINUTES="${SOAK_MINUTES:-60}"
+  if [ -z "${SOAK_RATE:-}" ]; then
+    SOAK_RATE="$(python3 - "$PROFILE" <<'PY'
+import glob, json, sys
+profile = sys.argv[1]
+best = None
+for path in sorted(glob.glob(f"results/*_{profile}_steady/result.json")):
+    r = json.load(open(path))
+    if r.get("max_sustainable_req_per_s"):
+        best = r["max_sustainable_req_per_s"]
+print(int(best * 0.6) if best else "")
+PY
+)"
+  fi
+  [ -n "$SOAK_RATE" ] || { echo "no steady result for $PROFILE to derive the soak rate from; set SOAK_RATE" >&2; exit 2; }
+  export SOAK_RATE SOAK_MINUTES
+  echo "soak: $SOAK_RATE req/s for $SOAK_MINUTES minutes"
+fi
 
 echo "==> build"
 mvn -q -B -DskipTests package
@@ -107,6 +127,7 @@ echo "==> environment"
     echo "ram_bytes=$(awk '/MemTotal/ {print $2*1024}' /proc/meminfo)"
   fi
   echo "jvm_opts=${JVM_OPTS:-defaults}"
+  [ "$SCENARIO" = soak ] && echo "soak_rate=$SOAK_RATE soak_minutes=$SOAK_MINUTES"
   echo "ablation=${BENCH_SERVICE_ENV:-none}"
   echo "kafka_brokers=$($COMPOSE ps --services | grep -c '^kafka-[0-9]')"
   echo "webhook_latency_ms=${WEBHOOK_LATENCY_MS:-5} webhook_failure_rate=${WEBHOOK_FAILURE_RATE:-0}"

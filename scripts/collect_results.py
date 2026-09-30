@@ -102,6 +102,32 @@ def phase_rows(summary, phases, t0):
     return rows
 
 
+def soak_section(run_dir, t0, seconds, windows=6):
+    """p99 in consecutive time windows (drift shows as a rising p99) and growth of resource series between the first and
+    last quarter of the run, from metrics.json. Observations for the reader; the only verdict is the per-window SLO."""
+    width = seconds / windows
+    rows = []
+    for i in range(windows):
+        lo, hi = t0 + i * width, t0 + (i + 1) * width
+        e = e2e_stats(f"created_at >= to_timestamp({lo}) and created_at < to_timestamp({hi})")
+        rows.append({"window": i + 1, "payments": e["count"], "e2e_p50_ms": round_or_none(e["p50"]),
+                     "e2e_p99_ms": round_or_none(e["p99"])})
+    growth = {}
+    path = os.path.join(run_dir, "metrics.json")
+    if os.path.exists(path):
+        series = json.load(open(path)).get("series", {})
+        for name in ("jvm_heap_used_bytes", "jvm_threads_live", "hikari_active", "process_cpu_usage"):
+            for label, s in series.get(name, {}).items():
+                pts = [v for _, v in s.get("points", [])]
+                if len(pts) >= 8:
+                    q = len(pts) // 4
+                    first, last = sum(pts[:q]) / q, sum(pts[-q:]) / q
+                    if first:
+                        growth[f"{name}[{label}]"] = round(last / first, 3)
+    return {"window_seconds": round(width), "windows": rows,
+            "last_quarter_over_first_quarter": growth}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--run-dir", required=True)
@@ -137,6 +163,11 @@ def main():
                   "burst_seconds": burst, "recover_seconds": recover}
         phases = [("warm", base, 0, warm), ("burst", base * 10, warm, burst),
                   ("recover", base, warm + burst, recover)]
+    elif a.scenario == "soak":
+        rate = int(os.environ["SOAK_RATE"])
+        minutes = int(os.environ.get("SOAK_MINUTES", "60"))
+        params = {"req_per_s": rate, "minutes": minutes}
+        phases = [("soak", rate, 0, minutes * 60)]
     else:
         params = {"vus": 10, "duration_seconds": 60}
         phases = []
@@ -216,6 +247,10 @@ def main():
                                    "complete under the 500 ms SLO again (last slow payment's creation time)",
         }
         slo["lag_recovers_within_2min"] = recovered and recovery <= SLO_RECOVERY_SECONDS  # e2e-latency proxy, not consumer lag
+    if a.scenario == "soak":
+        result["soak"] = soak_section(a.run_dir, t0, params["minutes"] * 60)
+        slo["every_window_p99_under_500ms"] = all(w["e2e_p99_ms"] is not None and w["e2e_p99_ms"] < SLO_P99_MS
+                                                   for w in result["soak"]["windows"])
     result["slo"] = slo
 
     with open(os.path.join(a.run_dir, "result.json"), "w") as fh:

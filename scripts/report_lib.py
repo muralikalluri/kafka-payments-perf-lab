@@ -385,6 +385,8 @@ def params_table(runs: dict) -> str:
         elif r.scenario == "spike":
             desc = (f"base {p['base_req_per_s']} req/s, burst {p['burst_req_per_s']} req/s for {p['burst_seconds']} s "
                     f"after {p['warm_seconds']} s, then {p['recover_seconds']} s recovery")
+        elif r.scenario == "soak":
+            desc = f"{p['req_per_s']} req/s for {p['minutes']} minutes"
         else:
             desc = f"{p['vus']} virtual users for {p['duration_seconds']} s"
         rows.append([run_label(r), desc])
@@ -433,3 +435,22 @@ def failover_table(runs: dict) -> str:
         return "_(no broker-failure runs are recorded)_"
     return table(["Profile", "Stopped", "Offered (req/s)", "HTTP error rate", "End-to-end p50", "End-to-end p99",
                   "Dropped iterations", "Invariants hold", "Sequence conflicts"], rows)
+
+
+def soak_tables(runs: dict) -> str:
+    """Per-window latency and resource growth for every soak run."""
+    soaks = [runs[k] for k in sorted(runs) if runs[k].scenario == "soak"]
+    if not soaks:
+        return "_(no soak runs are recorded)_"
+    out = []
+    for r in soaks:
+        soak = r.result["soak"]
+        p = r.result["params"]
+        rows = [[w["window"], w["payments"], ms(w["e2e_p50_ms"]), ms(w["e2e_p99_ms"])] for w in soak["windows"]]
+        out.append(f"**{r.profile}**: {p['req_per_s']} req/s for {p['minutes']} minutes, in windows of "
+                   f"{soak['window_seconds']} s\n\n" + table(["Window", "Payments created", "End-to-end p50", "End-to-end p99"], rows))
+        growth = soak["last_quarter_over_first_quarter"]
+        if growth:
+            out.append(table(["Series (last quarter average over first quarter average)", "Ratio"],
+                             [[k, f"{v:.2f}"] for k, v in sorted(growth.items())]))
+    return "\n\n".join(out)

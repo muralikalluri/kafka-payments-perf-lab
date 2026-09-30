@@ -604,6 +604,7 @@ def build_values(runs: dict) -> dict:
         "table.mvp_status": mvp_status_table(runs),
         "fact.kafka_topology": L.kafka_topology(runs),
         "table.failover": L.failover_table(runs),
+        "table.soak": L.soak_tables(runs),
         "fact.failover_note": failover_note(runs),
         "table.extended_scope": extended_scope_table(runs),
         "fact.not_built": not_built_sentence(runs),

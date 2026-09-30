@@ -220,6 +220,23 @@ class FailoverIsolationTest(unittest.TestCase):
         self.assertIn("min.insync.replicas 2", L.kafka_topology(clustered))
 
 
+class SoakTest(unittest.TestCase):
+    def test_soak_tables_render_from_a_soak_result(self):
+        runs = L.load_runs()
+        self.assertIn("no soak runs", L.soak_tables(runs) if not any(r.scenario == "soak" for r in runs.values()) else "no soak runs")
+        fake = copy.deepcopy(runs["tuned_smoke"])
+        fake.scenario, fake.suffix, fake.key = "soak", None, "tuned_soak"
+        fake.result["params"] = {"req_per_s": 60, "minutes": 2}
+        fake.result["soak"] = {"window_seconds": 20, "windows": [
+            {"window": 1, "payments": 10, "e2e_p50_ms": 5.0, "e2e_p99_ms": 20.0}],
+            "last_quarter_over_first_quarter": {"jvm_heap_used_bytes[x]": 1.25}}
+        runs["tuned_soak"] = fake
+        text = L.soak_tables(runs)
+        self.assertIn("60 req/s for 2 minutes", text)
+        self.assertIn("1.25", text)
+        self.assertIn("60 req/s for 2 minutes", L.params_table(runs))
+
+
 class RoadmapTest(unittest.TestCase):
     def setUp(self):
         self.fs = G.findings()
