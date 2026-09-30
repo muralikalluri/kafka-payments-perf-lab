@@ -1,0 +1,10 @@
+spring:
+  application:
+    name: payment-gateway
+server:
+  port: 8080
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

@@ -1,0 +1,18 @@
+# Fixed CPU/memory limits so benchmark runs are reproducible.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.resources.yml up -d
+services:
+  kafka:
+    cpus: 2.0
+    mem_limit: 2g
+  postgres:
+    cpus: 2.0
+    mem_limit: 2g
+  redis:
+    cpus: 0.5
+    mem_limit: 256m
+  prometheus:
+    cpus: 0.5
+    mem_limit: 512m
+  grafana:
+    cpus: 0.5
+    mem_limit: 512m
