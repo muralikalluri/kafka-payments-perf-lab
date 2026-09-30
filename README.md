@@ -38,6 +38,7 @@ The same offered rates against both profiles (end-to-end = payment accepted unti
 
 **Read this before quoting a number.**
 - Limits are known only to step resolution, so each profile has a range, not a point. The two step ranges do not overlap, so the tuned profile sustains a clearly higher load, but the step lists are coarse, so no single "times faster" figure is given.
+- In `2026-09-30_tuned_steady_coldstart-800-3200` (first step 800 req/s) and `2026-09-30_tuned_steady_extended` (first step 400 req/s) the first step missed the SLO although the same offered rate met it when reached after lighter steps in another run. That is consistent with warm-up (JIT compilation, connection pools, caches); it was observed once per run and is not proven.
 - The burst rate is below the highest step the tuned profile sustained in the steady runs, so the tuned system was never overloaded by the burst: this shows no degradation under the same load, not a faster recovery.
 - An earlier recording of the baseline spike scenario (commit `eecb939`), made before the baseline-affecting fixes, recovered within the window; the standard recording used in the tables above did not. A further recording, taken while the dashboard was being captured (`2026-09-30_baseline_spike_recorded`), also recovered. The recordings disagree, which shows run-to-run variance in this scenario for the baseline; no cause was attributed and no single recovery time is claimed.
 - The tuned profile has a higher median end-to-end latency than the baseline at low load (the smoke run and the lowest steady step). The likely causes are the outbox polling on the gateway and the ledger and producer lingering, but that was not verified. It is a real trade-off: a higher latency floor at low load in exchange for capacity at high load.
@@ -91,6 +92,12 @@ Results land in `results/<date>_<profile>_<scenario>/` (`result.json`, `summary.
 
 The findings covered: F-01 producer batching, F-03 consumer concurrency, F-04 batch ledger writes, F-06 indexes, F-07 outbox and pool sizing, F-08 N+1 queries, F-12 record key and partitions, F-13 distributed account cache.
 
+### Scope and known gaps
+
+Built to the MVP cut in [SPEC.md](SPEC.md). Not built, by design: F-02, F-05, F-09, F-10 and F-11, the notification service, a multi-broker cluster, the soak scenario and Gatling, tracing and flame graphs, PDF styling and a reusable report template folder.
+
+Known gaps in what was built: no load shedding on the gateway outbox backlog; no consumer-lag, CPU, garbage-collection or lock-wait snapshots stored with the results; FX rates are cached in process rather than in Redis; connection-pool sizes are unswept lab choices; the cache accepts bounded staleness (a blocked account can be approved until its cached copy is invalidated or expires).
+
 ## Design decisions
 
 The reasoning behind the main choices is recorded as architecture decision records:
@@ -109,12 +116,6 @@ The reasoning behind the main choices is recorded as architecture decision recor
 
 - [Full audit report (sample)](sample-deliverable/AUDIT_REPORT_SAMPLE.md): executive summary, method, architecture, baseline results, findings with evidence, impact, recommendation, effort and risk, an impact against effort matrix, architecture observations, tuned against baseline, and the limits of the evidence.
 - [Quick audit of one service (sample)](sample-deliverable/QUICK_AUDIT_ledger-service.md): a configuration and code review with no load test.
-
-## Scope and known gaps
-
-Built to the MVP cut in [SPEC.md](SPEC.md). Not built, by design: F-02, F-05, F-09, F-10 and F-11, the notification service, a multi-broker cluster, the soak scenario and Gatling, tracing and flame graphs, PDF styling and a reusable report template folder.
-
-Known gaps in what was built: no load shedding on the gateway outbox backlog; no consumer-lag, CPU, garbage-collection or lock-wait snapshots stored with the results; FX rates are cached in process rather than in Redis; connection-pool sizes are unswept lab choices; the cache accepts bounded staleness (a blocked account can be approved until its cached copy is invalidated or expires).
 
 ## Hire me
 

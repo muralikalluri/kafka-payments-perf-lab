@@ -12,7 +12,7 @@ Status: accepted (M3, M5)
   list and step length are parameters recorded in each `result.json`. A step meets the objective only if POST p99,
   end-to-end p99, error rate and dropped iterations all pass. Limits are therefore known to step resolution.
 - **Invariants are part of the result.** After every run the collector checks that no balance is negative, debits
-  equal credits, total money is conserved, nothing is pending or in an outbox, and every payment is terminal. A run
+  equal credits, total money is conserved, nothing is left pending or in the ledger outbox, and every payment is terminal (which also covers anything still waiting in the gateway outbox). A run
   that violates them exits non-zero.
 - **Provenance.** Each result records the git revision and whether the tree was dirty, the machine and container
   limits, and (for tuned) the tuned configuration. Extra runs use `RUN_SUFFIX`; nothing is deleted to look better,

@@ -44,11 +44,11 @@
 |---|---|
 | `2026-09-30_baseline_smoke` | 10 virtual users for 60 s |
 | `2026-09-30_baseline_spike` | base 50 req/s, burst 500 req/s for 60 s after 30 s, then 120 s recovery |
-| `2026-09-30_baseline_spike_recorded` | base 50 req/s, burst 500 req/s for 60 s after 30 s, then 120 s recovery |
+| `2026-09-30_baseline_spike_recorded` (recorded during the dashboard capture) | base 50 req/s, burst 500 req/s for 60 s after 30 s, then 120 s recovery |
 | `2026-09-30_baseline_steady` | steps 100, 200, 400, 800 req/s, 60 s each |
 | `2026-09-30_tuned_smoke` | 10 virtual users for 60 s |
 | `2026-09-30_tuned_spike` | base 50 req/s, burst 500 req/s for 60 s after 30 s, then 120 s recovery |
-| `2026-09-30_tuned_spike_recorded` | base 50 req/s, burst 500 req/s for 60 s after 30 s, then 120 s recovery |
+| `2026-09-30_tuned_spike_recorded` (recorded during the dashboard capture) | base 50 req/s, burst 500 req/s for 60 s after 30 s, then 120 s recovery |
 | `2026-09-30_tuned_steady` | steps 100, 200, 400, 800 req/s, 60 s each |
 | `2026-09-30_tuned_steady_coldstart-800-3200` | steps 800, 1600, 2400, 3200 req/s, 60 s each |
 | `2026-09-30_tuned_steady_extended` | steps 400, 800, 1200, 1600 req/s, 60 s each |
@@ -102,7 +102,7 @@ A client submits a payment with an idempotency key. The gateway records it, assi
 |---|---|---|---|---|---|---|
 | `2026-09-30_baseline_smoke` | 1640 | yes | 0 | 0 | 0 | 0 |
 | `2026-09-30_baseline_spike` | 33836 | yes | 0 | 0 | 0 | 0 |
-| `2026-09-30_baseline_spike_recorded` | 33759 | yes | 0 | 0 | 0 | 0 |
+| `2026-09-30_baseline_spike_recorded` (recorded during the dashboard capture) | 33759 | yes | 0 | 0 | 0 | 0 |
 | `2026-09-30_baseline_steady` | 62009 | yes | 0 | 0 | 0 | 0 |
 
 ## 5. Findings
@@ -287,7 +287,7 @@ quadrantChart
 |---|---|---|---|---|---|---|
 | `2026-09-30_tuned_smoke` | 1660 | yes | 0 | 0 | 0 | 0 |
 | `2026-09-30_tuned_spike` | 33808 | yes | 0 | 0 | 0 | 0 |
-| `2026-09-30_tuned_spike_recorded` | 33706 | yes | 0 | 0 | 0 | 0 |
+| `2026-09-30_tuned_spike_recorded` (recorded during the dashboard capture) | 33706 | yes | 0 | 0 | 0 | 0 |
 | `2026-09-30_tuned_steady` | 81001 | yes | 0 | 0 | 0 | 0 |
 | `2026-09-30_tuned_steady_coldstart-800-3200` | 238631 | yes | 0 | 0 | 0 | 0 |
 | `2026-09-30_tuned_steady_extended` | 209731 | yes | 0 | 0 | 0 | 0 |
@@ -432,11 +432,11 @@ spring:
 |---|---|---|
 | `2026-09-30_baseline_smoke` | 06ce6f4 | [result.json](../results/2026-09-30_baseline_smoke/result.json) · [summary.json](../results/2026-09-30_baseline_smoke/summary.json) · [env.txt](../results/2026-09-30_baseline_smoke/env.txt) · [explain.txt](../results/2026-09-30_baseline_smoke/explain.txt) |
 | `2026-09-30_baseline_spike` | 06ce6f4 | [result.json](../results/2026-09-30_baseline_spike/result.json) · [summary.json](../results/2026-09-30_baseline_spike/summary.json) · [env.txt](../results/2026-09-30_baseline_spike/env.txt) · [explain.txt](../results/2026-09-30_baseline_spike/explain.txt) |
-| `2026-09-30_baseline_spike_recorded` | 8862be4 | [result.json](../results/2026-09-30_baseline_spike_recorded/result.json) · [summary.json](../results/2026-09-30_baseline_spike_recorded/summary.json) · [env.txt](../results/2026-09-30_baseline_spike_recorded/env.txt) · [explain.txt](../results/2026-09-30_baseline_spike_recorded/explain.txt) |
+| `2026-09-30_baseline_spike_recorded` (recorded during the dashboard capture) | 8862be4 | [result.json](../results/2026-09-30_baseline_spike_recorded/result.json) · [summary.json](../results/2026-09-30_baseline_spike_recorded/summary.json) · [env.txt](../results/2026-09-30_baseline_spike_recorded/env.txt) · [explain.txt](../results/2026-09-30_baseline_spike_recorded/explain.txt) |
 | `2026-09-30_baseline_steady` | 06ce6f4 | [result.json](../results/2026-09-30_baseline_steady/result.json) · [summary.json](../results/2026-09-30_baseline_steady/summary.json) · [env.txt](../results/2026-09-30_baseline_steady/env.txt) · [explain.txt](../results/2026-09-30_baseline_steady/explain.txt) |
 | `2026-09-30_tuned_smoke` | 06ce6f4 | [result.json](../results/2026-09-30_tuned_smoke/result.json) · [summary.json](../results/2026-09-30_tuned_smoke/summary.json) · [env.txt](../results/2026-09-30_tuned_smoke/env.txt) · [explain.txt](../results/2026-09-30_tuned_smoke/explain.txt) |
 | `2026-09-30_tuned_spike` | 06ce6f4 | [result.json](../results/2026-09-30_tuned_spike/result.json) · [summary.json](../results/2026-09-30_tuned_spike/summary.json) · [env.txt](../results/2026-09-30_tuned_spike/env.txt) · [explain.txt](../results/2026-09-30_tuned_spike/explain.txt) |
-| `2026-09-30_tuned_spike_recorded` | 8862be4 | [result.json](../results/2026-09-30_tuned_spike_recorded/result.json) · [summary.json](../results/2026-09-30_tuned_spike_recorded/summary.json) · [env.txt](../results/2026-09-30_tuned_spike_recorded/env.txt) · [explain.txt](../results/2026-09-30_tuned_spike_recorded/explain.txt) |
+| `2026-09-30_tuned_spike_recorded` (recorded during the dashboard capture) | 8862be4 | [result.json](../results/2026-09-30_tuned_spike_recorded/result.json) · [summary.json](../results/2026-09-30_tuned_spike_recorded/summary.json) · [env.txt](../results/2026-09-30_tuned_spike_recorded/env.txt) · [explain.txt](../results/2026-09-30_tuned_spike_recorded/explain.txt) |
 | `2026-09-30_tuned_steady` | 06ce6f4 | [result.json](../results/2026-09-30_tuned_steady/result.json) · [summary.json](../results/2026-09-30_tuned_steady/summary.json) · [env.txt](../results/2026-09-30_tuned_steady/env.txt) · [explain.txt](../results/2026-09-30_tuned_steady/explain.txt) |
 | `2026-09-30_tuned_steady_coldstart-800-3200` | 958b37b | [result.json](../results/2026-09-30_tuned_steady_coldstart-800-3200/result.json) · [summary.json](../results/2026-09-30_tuned_steady_coldstart-800-3200/summary.json) · [env.txt](../results/2026-09-30_tuned_steady_coldstart-800-3200/env.txt) · [explain.txt](../results/2026-09-30_tuned_steady_coldstart-800-3200/explain.txt) |
 | `2026-09-30_tuned_steady_extended` | 958b37b | [result.json](../results/2026-09-30_tuned_steady_extended/result.json) · [summary.json](../results/2026-09-30_tuned_steady_extended/summary.json) · [env.txt](../results/2026-09-30_tuned_steady_extended/env.txt) · [explain.txt](../results/2026-09-30_tuned_steady_extended/explain.txt) |

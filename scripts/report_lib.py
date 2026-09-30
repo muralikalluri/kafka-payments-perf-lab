@@ -105,6 +105,13 @@ def table(headers, rows) -> str:
     return "\n".join(out)
 
 
+def run_label(run: Run) -> str:
+    label = f"`{os.path.basename(run.dir)}`"
+    if run.suffix == "recorded":
+        label += " (recorded during the dashboard capture)"
+    return label
+
+
 def rel(path: str) -> str:
     return os.path.relpath(path, ROOT)
 
@@ -287,7 +294,7 @@ def invariants_table(runs: dict, profile=None) -> str:
         if profile and r.profile != profile:
             continue
         i = r.result["invariants"]
-        rows.append([f"`{os.path.basename(r.dir)}`", r.result["pipeline"]["payments_created"],
+        rows.append([run_label(r), r.result["pipeline"]["payments_created"],
                      yes_no(i["all_hold"]), i["negative_balances"], i["debits_minus_credits_minor"],
                      i["non_terminal_payments"], i["sequence_conflicts"]])
     return table(["Run", "Payments created", "All invariants hold", "Negative balances",
@@ -347,7 +354,7 @@ def results_index(runs: dict) -> str:
                  f"[env.txt](../{base}/env.txt)"]
         if r.explain:
             links.append(f"[explain.txt](../{base}/explain.txt)")
-        rows.append([f"`{os.path.basename(r.dir)}`", r.result["git_sha"][:7], " · ".join(links)])
+        rows.append([run_label(r), r.result["git_sha"][:7], " · ".join(links)])
     return table(["Run", "Git sha", "Files"], rows)
 
 
@@ -363,7 +370,7 @@ def params_table(runs: dict) -> str:
                     f"after {p['warm_seconds']} s, then {p['recover_seconds']} s recovery")
         else:
             desc = f"{p['vus']} virtual users for {p['duration_seconds']} s"
-        rows.append([f"`{os.path.basename(r.dir)}`", desc])
+        rows.append([run_label(r), desc])
     return table(["Run", "Scenario parameters"], rows)
 
 

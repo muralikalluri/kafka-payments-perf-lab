@@ -1,3 +1,4 @@
+# Deliberately insecure for demonstration. Do not deploy. (Placeholder credentials, no authentication on Kafka or Redis.)
 # Lab stack. Single Kafka broker (RF=1) is a deliberate lab limitation; see SPEC.md §12.
 name: kafka-payments-perf-lab
 

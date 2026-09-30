@@ -273,7 +273,8 @@ class ReadmeTest(unittest.TestCase):
 
     def test_no_secrets_or_local_paths(self):
         self.assertNotIn("/Users/", self.readme)
-        self.assertNotIn("kalluri.murali", self.readme)
+        import re
+        self.assertIsNone(re.search(r"[\w.+-]+@[\w-]+\.[\w.]+", self.readme), "no email address in the README")
 
 
 if __name__ == "__main__":
