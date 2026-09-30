@@ -16,6 +16,7 @@ PUPPETEER_NODE_PATH="${PUPPETEER_NODE_PATH:-$ROOT/scripts/record-grafana/node_mo
 command -v ffmpeg >/dev/null || { echo "ffmpeg is required" >&2; exit 2; }
 
 SCRATCH="${SCRATCH:-$(mktemp -d)}"
+mkdir -p "$SCRATCH"
 CAPTURE_SECONDS="${CAPTURE_SECONDS:-240}"   # warm + burst + recovery phases plus a tail
 INTERVAL="${INTERVAL:-3}"
 echo "scratch: $SCRATCH"
