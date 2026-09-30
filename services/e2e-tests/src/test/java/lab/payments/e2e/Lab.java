@@ -164,6 +164,28 @@ final class Lab {
         }
     }
 
+    /** Total records ever written to a topic (sum of end offsets). */
+    static long recordCount(String topic) {
+        Properties props = new Properties();
+        props.put("bootstrap.servers", KAFKA.getBootstrapServers());
+        props.put("key.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
+        props.put("value.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
+        try (KafkaConsumer<String, String> consumer = new KafkaConsumer<>(props)) {
+            List<org.apache.kafka.common.TopicPartition> partitions = consumer.partitionsFor(topic).stream()
+                    .map(p -> new org.apache.kafka.common.TopicPartition(topic, p.partition())).toList();
+            return consumer.endOffsets(partitions).values().stream().mapToLong(Long::longValue).sum();
+        }
+    }
+
+    /** Number of consumer threads (group members) currently in a consumer group. */
+    static int groupMembers(String group) {
+        try (Admin admin = Admin.create(Map.<String, Object>of("bootstrap.servers", KAFKA.getBootstrapServers()))) {
+            return admin.describeConsumerGroups(List.of(group)).all().get().get(group).members().size();
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
     static boolean tuned() {
         return "tuned".equals(PROFILE);
     }

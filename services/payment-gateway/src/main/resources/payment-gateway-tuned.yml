@@ -10,3 +10,9 @@ lab:
     partitions: 12
   tuning:
     f12: true
+
+# F-03: consumer concurrency matched to the partition count (one thread per partition, single instance).
+spring:
+  kafka:
+    listener:
+      concurrency: 12

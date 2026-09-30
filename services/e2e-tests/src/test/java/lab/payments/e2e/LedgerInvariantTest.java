@@ -216,4 +216,50 @@ class LedgerInvariantTest {
         assertThat(balance(otherCreditor)).isEqualTo(10);
         assertThat(balance(debtor)).isEqualTo(970);
     }
+
+    /**
+     * Transfers among a small ring of accounts, submitted concurrently, provoke lock contention
+     * (every account is both debtor and creditor). Money is conserved, every payment reaches a
+     * terminal state, and nothing is dead-lettered (a deadlock loser would be retried, not lost).
+     */
+    @Test
+    void randomTransfersAmongFewAccountsConserveMoneyWithoutDeadLetters() throws Exception {
+        long dltBefore = Lab.recordCount(Topics.VALIDATED + ".DLT") + Lab.recordCount(Topics.INITIATED + ".DLT");
+        List<String> accounts = new ArrayList<>();
+        for (int i = 0; i < 6; i++) {
+            accounts.add(Lab.account(CLIENT, 500));
+        }
+        ExecutorService pool = Executors.newFixedThreadPool(16);
+        List<Callable<Integer>> calls = new ArrayList<>();
+        java.util.Random random = new java.util.Random(42);
+        for (int i = 0; i < 300; i++) {
+            int from = random.nextInt(accounts.size());
+            int to = (from + 1 + random.nextInt(accounts.size() - 1)) % accounts.size();
+            String merchant = MERCHANTS[i % MERCHANTS.length];
+            String debtor = accounts.get(from);
+            String creditor = accounts.get(to);
+            calls.add(() -> Lab.post(CLIENT, "k-" + UUID.randomUUID(),
+                    Lab.body(debtor, creditor, merchant, 1 + random.nextInt(3))).statusCode());
+        }
+        for (Future<Integer> f : pool.invokeAll(calls)) {
+            assertThat(f.get()).isEqualTo(202);
+        }
+        pool.shutdown();
+
+        Lab.await("all ring payments terminal", () -> {
+            int terminal = 0;
+            for (String a : accounts) {
+                terminal += Lab.count("SELECT count(*) FROM gateway.payments WHERE debtor_account_id = ? AND status_rank = 3", a);
+            }
+            return terminal == 300;
+        });
+        long total = 0;
+        for (String a : accounts) {
+            assertThat(balance(a)).isGreaterThanOrEqualTo(0);
+            total += balance(a);
+        }
+        assertThat(total).isEqualTo(6 * 500L);
+        assertThat(Lab.recordCount(Topics.VALIDATED + ".DLT") + Lab.recordCount(Topics.INITIATED + ".DLT"))
+                .isEqualTo(dltBefore);
+    }
 }

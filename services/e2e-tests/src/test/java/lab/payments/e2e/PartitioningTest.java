@@ -34,4 +34,13 @@ class PartitioningTest {
             assertThat(Lab.partitionCount(topic)).as(topic).isEqualTo(partitions);
         }
     }
+
+    /** F-03: consumer threads per group follow the profile (1 in baseline, one per partition when tuned). */
+    @Test
+    void consumerConcurrencyFollowsTheProfile() {
+        int expected = Lab.tuned() ? 12 : 1;
+        for (String group : new String[] {"payment-gateway", "validation-service", "ledger-service"}) {
+            Lab.await(group + " has " + expected + " consumer thread(s)", () -> Lab.groupMembers(group) == expected);
+        }
+    }
 }
