@@ -73,15 +73,18 @@ def k6_section(summary):
 
 
 def phase_rows(summary, phases, t0):
+    last_index = len(phases) - 1
     """phases: list of (name, target_rate, start_offset_s, duration_s)."""
     rows = []
-    for name, rate, start, dur in phases:
+    for index, (name, rate, start, dur) in enumerate(phases):
         d = k6_metric(summary, f"http_req_duration{{scenario:{name}}}")
         f = k6_metric(summary, f"http_req_failed{{scenario:{name}}}")
         r = k6_metric(summary, f"http_reqs{{scenario:{name}}}")
         x = k6_metric(summary, f"dropped_iterations{{scenario:{name}}}")
         lo, hi = t0 + start, t0 + start + dur
-        e2e = e2e_stats(f"created_at >= to_timestamp({lo}) and created_at < to_timestamp({hi})")
+        # The last phase is open-ended: requests started in it can be created a little later under load.
+        upper = "" if index == last_index else f" and created_at < to_timestamp({hi})"
+        e2e = e2e_stats(f"created_at >= to_timestamp({lo}){upper}")
         row = {
             "phase": name, "target_req_per_s": rate,
             "achieved_req_per_s": round_or_none(r["count"] / dur) if r else None,  # count over the phase, not k6's whole-run rate
@@ -105,8 +108,6 @@ def main():
     ap.add_argument("--profile", required=True)
     ap.add_argument("--scenario", required=True)
     ap.add_argument("--k6-exit", type=int, required=True)
-    ap.add_argument("--started-at", type=float, required=True)
-    ap.add_argument("--finished-at", type=float, required=True)
     a = ap.parse_args()
 
     with open(os.path.join(a.run_dir, "summary.json")) as fh:
@@ -163,6 +164,8 @@ def main():
         "schema_version": 1,
         "profile": a.profile, "scenario": a.scenario,
         "git_sha": subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip(),
+        "git_dirty": bool(subprocess.run(["git", "status", "--porcelain", "--", ".", ":(exclude)results"],
+                                         capture_output=True, text=True).stdout.strip()),
         "params": params,
         "k6": k6_section(summary),
         "k6_thresholds_passed": a.k6_exit == 0,
@@ -175,13 +178,14 @@ def main():
         "invariants": invariants,
     }
 
-    slo = {
-        "p99_e2e_under_500ms": overall["p99"] is not None and overall["p99"] < SLO_P99_MS,
-        "error_rate_under_0_1pct": result["k6"]["http_req_failed_rate"] < SLO_ERROR_RATE,
-    }
+    slo = {"error_rate_under_0_1pct": result["k6"]["http_req_failed_rate"] < SLO_ERROR_RATE}
+    if a.scenario == "smoke":
+        # Stepped and spike runs overload on purpose; they are judged per phase, not overall.
+        slo["p99_e2e_under_500ms"] = overall["p99"] is not None and overall["p99"] < SLO_P99_MS
     if a.scenario == "steady":
         ok = [p for p in result["phases"] if p["meets_slo"]]
         result["max_sustainable_req_per_s"] = max((p["achieved_req_per_s"] for p in ok), default=None)
+        result["phases_unattributed_payments"] = overall["count"] - sum(p["e2e_ms"]["count"] for p in result["phases"])
     if a.scenario == "spike":
         burst_end = t0 + params["warm_seconds"] + params["burst_seconds"]
         run_end = burst_end + params["recover_seconds"]
@@ -193,6 +197,7 @@ def main():
         last_slow = float(last_slow[0]) if last_slow and last_slow[0] else None
         recovery = 0.0 if last_slow is None else max(0.0, last_slow - burst_end)
         recovered = last_slow is None or last_slow < run_end - 5
+        result["phases_unattributed_payments"] = overall["count"] - sum(p["e2e_ms"]["count"] for p in result["phases"])
         result["spike"] = {
             "recovery_seconds_after_burst": round(recovery, 1),
             "recovered_within_run": recovered,

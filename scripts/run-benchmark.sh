@@ -71,7 +71,7 @@ echo "==> environment"
 {
   echo "profile=$PROFILE"
   echo "scenario=$SCENARIO"
-  echo "git_sha=$(git rev-parse HEAD)$(git diff --quiet && git diff --cached --quiet || echo '-dirty')"
+  echo "git_sha=$(git rev-parse HEAD)$([ -z "$(git status --porcelain -- . ':(exclude)results')" ] || echo '-dirty')"
   echo "date_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo "os=$(uname -srm)"
   if [ "$(uname)" = Darwin ]; then
@@ -97,21 +97,21 @@ echo "==> environment"
 } > "$RUN_DIR/env.txt"
 
 echo "==> k6 $SCENARIO"
-STARTED_AT="$(python3 -c 'import time; print(time.time())')"
 set +e
 SUMMARY_PATH="$RUN_DIR/summary.json" k6 run --quiet "load/k6/$SCENARIO.js" 2>&1 | tee "$RUN_DIR/raw/k6.log"
 K6_EXIT=${PIPESTATUS[0]}
 set -e
 
 echo "==> wait for the pipeline to drain"
+left=1
 for i in $(seq 1 300); do
   left=$($COMPOSE exec -T postgres psql -U payments -d payments -At \
     -c "select count(*) from gateway.payments where status_rank < 3")
   [ "$left" = 0 ] && break
   sleep 1
 done
-FINISHED_AT="$(python3 -c 'import time; print(time.time())')"
+[ "$left" = 0 ] || echo "WARNING: $left payments still not terminal after 300 s; invariants will fail" >&2
 
 echo "==> collect"
 python3 scripts/collect_results.py --run-dir "$RUN_DIR" --profile "$PROFILE" --scenario "$SCENARIO" \
-  --k6-exit "$K6_EXIT" --started-at "$STARTED_AT" --finished-at "$FINISHED_AT"
+  --k6-exit "$K6_EXIT"

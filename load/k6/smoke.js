@@ -69,7 +69,7 @@ export default function () {
   body = JSON.stringify({
     debtorAccountId: acc(rnd(1, 800)),
     creditorAccountId: failing ? 'SANC-0001' : acc(rnd(801, 990)),
-    merchantId: `MER-${rnd(1, 20)}`,
+    merchantId: `MER-${String(rnd(1, 20)).padStart(3, '0')}`,
     amountMinor: rnd(1, 100),
     currency: 'USD',
   });
