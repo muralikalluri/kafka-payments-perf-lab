@@ -1,0 +1,128 @@
+{
+  "schema_version": 1,
+  "profile": "baseline",
+  "scenario": "steady",
+  "git_sha": "7ed651323e3f0f066c16ff9203e4cc69fa895a01",
+  "git_dirty": false,
+  "params": {
+    "steps_req_per_s": [
+      100,
+      200,
+      400,
+      800
+    ],
+    "step_seconds": 60
+  },
+  "k6": {
+    "http_reqs": 69837,
+    "req_per_s": 284.48,
+    "http_req_failed_rate": 0,
+    "post_latency_ms": {
+      "p50": 3.83,
+      "p95": 5307.97,
+      "p99": 5697.04,
+      "max": 6652.9
+    },
+    "dropped_iterations": 20166,
+    "checks_pass_rate": 1
+  },
+  "k6_thresholds_passed": false,
+  "pipeline": {
+    "payments_created": 62959,
+    "terminal": 62959,
+    "posted": 55996,
+    "rejected": 6963,
+    "rejected_by_reason": {
+      "SANCTIONS_HIT": 6963
+    },
+    "e2e_ms": {
+      "count": 62959,
+      "p50": 100313.16,
+      "p95": 178718.47,
+      "p99": 186098.01,
+      "max": 187728.15
+    }
+  },
+  "phases": [
+    {
+      "phase": "step_100",
+      "target_req_per_s": 100,
+      "achieved_req_per_s": 100.02,
+      "post_p99_ms": 6.69,
+      "http_req_failed_rate": 0,
+      "dropped_iterations": 0,
+      "e2e_ms": {
+        "count": 5372,
+        "p50": 5.86,
+        "p95": 11.37,
+        "p99": 179.5,
+        "max": 393.18
+      },
+      "meets_slo": true
+    },
+    {
+      "phase": "step_200",
+      "target_req_per_s": 200,
+      "achieved_req_per_s": 200.02,
+      "post_p99_ms": 7.58,
+      "http_req_failed_rate": 0,
+      "dropped_iterations": 0,
+      "e2e_ms": {
+        "count": 10814,
+        "p50": 5.92,
+        "p95": 34.54,
+        "p99": 86.38,
+        "max": 174.4
+      },
+      "meets_slo": true
+    },
+    {
+      "phase": "step_400",
+      "target_req_per_s": 400,
+      "achieved_req_per_s": 400.0,
+      "post_p99_ms": 23.05,
+      "http_req_failed_rate": 0,
+      "dropped_iterations": 0,
+      "e2e_ms": {
+        "count": 21544,
+        "p50": 84038.42,
+        "p95": 115022.4,
+        "p99": 117365.95,
+        "max": 117983.13
+      },
+      "meets_slo": false
+    },
+    {
+      "phase": "step_800",
+      "target_req_per_s": 800,
+      "achieved_req_per_s": 463.9,
+      "post_p99_ms": 5779.71,
+      "http_req_failed_rate": 0,
+      "dropped_iterations": 20166,
+      "e2e_ms": {
+        "count": 25229,
+        "p50": 150704.79,
+        "p95": 184177.23,
+        "p99": 187281.12,
+        "max": 187728.15
+      },
+      "meets_slo": false
+    }
+  ],
+  "invariants": {
+    "negative_balances": 0,
+    "debits_minus_credits_minor": 0,
+    "demo_total_balance_minor": 100000000000,
+    "pending_rows": 0,
+    "outbox_rows": 0,
+    "non_terminal_payments": 0,
+    "ledger_payments_minus_gateway_payments": 0,
+    "sequence_conflicts": 0,
+    "all_hold": true
+  },
+  "max_sustainable_req_per_s": 200.02,
+  "phases_unattributed_payments": 0,
+  "slo": {
+    "error_rate_under_0_1pct": true
+  }
+}
