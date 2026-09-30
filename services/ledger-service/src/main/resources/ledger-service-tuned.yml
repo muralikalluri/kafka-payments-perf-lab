@@ -8,16 +8,24 @@ lab:
     # F-12: 12 partitions on every topic (sizing rationale: docs/adr/0005-partition-sizing.md). Each service
     # sets it because each one's KafkaAdmin creates or grows the shared topics.
     partitions: 12
+  outbox:
+    poll-ms: 50       # F-04: the outbox flush no longer runs on (and serialises) the listener threads
   tuning:
     # F-12: key by debtor account id. F-01 / F-07 flags select async publishing / the gateway outbox.
     f01: true
+    f04: true
     f12: true
 
 spring:
   kafka:
     listener:
+      type: batch     # F-04
       # F-03: consumer concurrency matched to the partition count (one thread per partition).
       concurrency: 12
+    consumer:
+      max-poll-records: 250
+      properties:
+        max.poll.interval.ms: 600000
     producer:
       # F-01: batch and compress instead of linger.ms=0 / no compression / default batch size.
       compression-type: lz4
@@ -30,6 +38,8 @@ spring:
       # far more threads than connections. Lab choice, not swept; see docs/adr/0004-outbox-and-tuning.md.
       maximum-pool-size: 8
       connection-timeout: 60000
+      data-source-properties:
+        reWriteBatchedInserts: true   # F-04: multi-row INSERT rewriting for JDBC batches
   # F-06: tuned-only migrations (indexes, outbox) in a separate Flyway location and version range (V100+).
   flyway:
     locations: classpath:db/ledger,classpath:db/ledger-tuned

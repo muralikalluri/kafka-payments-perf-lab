@@ -43,7 +43,7 @@ class OutboxPublisher {
         }
     }
 
-    @Scheduled(fixedDelay = 250)
+    @Scheduled(fixedDelayString = "${lab.outbox.poll-ms:250}")
     synchronized void flush() {
         List<Row> rows = jdbc.query(
                 "SELECT id, msg_key, payload FROM outbox ORDER BY id LIMIT 500",

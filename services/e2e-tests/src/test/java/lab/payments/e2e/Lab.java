@@ -143,6 +143,28 @@ final class Lab {
         return recordWith(topic, needle).value();
     }
 
+    /** Stops the ledger's consumers from fetching so records queue up and later arrive as one batch. */
+    static void pauseLedgerConsumers() {
+        var containers = LEDGER.getBean(org.springframework.kafka.config.KafkaListenerEndpointRegistry.class)
+                .getListenerContainers();
+        containers.forEach(org.springframework.kafka.listener.MessageListenerContainer::pause);
+        await("ledger consumers paused", () -> containers.stream()
+                .allMatch(org.springframework.kafka.listener.MessageListenerContainer::isContainerPaused));
+    }
+
+    static void resumeLedgerConsumers() {
+        LEDGER.getBean(org.springframework.kafka.config.KafkaListenerEndpointRegistry.class)
+                .getListenerContainers().forEach(org.springframework.kafka.listener.MessageListenerContainer::resume);
+    }
+
+    static void pausePostgres() {
+        POSTGRES.getDockerClient().pauseContainerCmd(POSTGRES.getContainerId()).exec();
+    }
+
+    static void unpausePostgres() {
+        POSTGRES.getDockerClient().unpauseContainerCmd(POSTGRES.getContainerId()).exec();
+    }
+
     static void pauseKafka() {
         KAFKA.getDockerClient().pauseContainerCmd(KAFKA.getContainerId()).exec();
     }

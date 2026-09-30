@@ -3,10 +3,13 @@ package lab.payments.ledgerservice;
 import lab.payments.common.Json;
 import lab.payments.common.PaymentValidated;
 import lab.payments.common.Topics;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 
+/** Baseline (F-04 anti-pattern): one record, one transaction. Replaced by BatchValidatedListener when tuned. */
 @Component
+@ConditionalOnProperty(name = "lab.tuning.f04", havingValue = "false", matchIfMissing = true)
 class ValidatedListener {
 
     private final LedgerService ledger;
