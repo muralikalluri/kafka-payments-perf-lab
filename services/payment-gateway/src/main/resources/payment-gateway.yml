@@ -1,0 +1,37 @@
+spring:
+  application:
+    name: payment-gateway
+  profiles:
+    active: ${LAB_PROFILE:baseline}
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5442/payments}
+    username: ${DB_USER:payments}
+    password: ${DB_PASSWORD:change-me-local-only}
+    hikari:
+      schema: gateway
+  flyway:
+    locations: classpath:db/gateway
+    schemas: gateway
+    default-schema: gateway
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+    producer:
+      acks: all
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      properties:
+        max.block.ms: 5000
+        request.timeout.ms: 5000
+        delivery.timeout.ms: 10000
+    consumer:
+      group-id: payment-gateway
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+server:
+  port: ${SERVER_PORT:8080}
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

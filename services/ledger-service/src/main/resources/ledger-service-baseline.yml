@@ -1,0 +1,9 @@
+# BASELINE profile: deliberately contains common real-world anti-patterns (see SPEC.md §3).
+lab:
+  topics:
+    partitions: 3          # F-12
+spring:
+  kafka:
+    listener:
+      concurrency: 1       # F-03: single consumer thread
+  # F-07: Hikari left at defaults (10 connections)

@@ -1,12 +1,20 @@
 package lab.payments.paymentgateway;
 
-import org.springframework.boot.SpringApplication;
+import lab.payments.common.TopicsConfig;
+import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.context.annotation.Import;
 
 @SpringBootApplication
+@Import(TopicsConfig.class)
 public class PaymentGatewayApplication {
 
+    /** Unique config name so all services can share one classpath in the e2e tests. */
+    public static final String CONFIG_NAME = "spring.config.name=payment-gateway";
+
     public static void main(String[] args) {
-        SpringApplication.run(PaymentGatewayApplication.class, args);
+        new SpringApplicationBuilder(PaymentGatewayApplication.class)
+                .properties(CONFIG_NAME)
+                .run(args);
     }
 }

@@ -1,0 +1,14 @@
+# BASELINE profile: deliberately contains common real-world anti-patterns (see SPEC.md §3).
+lab:
+  topics:
+    partitions: 3          # F-12: only 3 partitions
+spring:
+  kafka:
+    producer:
+      # F-01: linger.ms=0, no compression, default batch size (send is also synchronous, see PaymentService)
+      compression-type: none
+      properties:
+        linger.ms: 0
+    listener:
+      concurrency: 1       # F-03
+  # F-07: Hikari left at defaults (10 connections) against Tomcat's 200 request threads
