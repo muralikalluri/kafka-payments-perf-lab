@@ -256,6 +256,36 @@ class ProfilingTest(unittest.TestCase):
         self.assertIn("no profiling runs", L.profile_tables(L.load_runs()) if not any(r.profile_summary for r in L.load_runs().values()) else "no profiling runs")
 
 
+class TemplateTest(unittest.TestCase):
+    """The client template keeps the same structure as the sample it mirrors."""
+
+    @staticmethod
+    def headings(path, prefix="## "):
+        with open(os.path.join(L.ROOT, path)) as fh:
+            return [line.strip() for line in fh if line.startswith(prefix)]
+
+    @staticmethod
+    def normalise(heading):
+        import re
+        return re.sub(r"[:(].*$", "", heading).strip().lower()
+
+    def test_template_has_every_top_level_section_of_the_sample(self):
+        sample = [self.normalise(h) for h in self.headings("sample-deliverable/AUDIT_REPORT_SAMPLE.md")]
+        template = [self.normalise(h) for h in self.headings("report/template/REPORT_TEMPLATE.md")]
+        # Sections 8 and 9 are named differently in the template ("Results against baseline") on purpose.
+        for h in sample:
+            self.assertTrue(any(h.split(". ", 1)[-1][:12] in t for t in template), f"missing from the template: {h}")
+
+    def test_template_contains_no_measured_numbers(self):
+        with open(os.path.join(L.ROOT, "report", "template", "REPORT_TEMPLATE.md")) as fh:
+            text = fh.read()
+        import re
+        stripped = re.sub(r"```.*?```", "", text, flags=re.S)
+        stripped = re.sub(r"F-\[nn\]|\bF-\d+\b|`[^`]*`|^#+ .*$|^\s*\d+\.\s", "", stripped, flags=re.M)
+        stripped = re.sub(r"section[s]? \d+( to \d+)?( and \d+)?|Appendix|Q-[A-Z]|\d+ \(|\bp\d\d\b", "", stripped)
+        self.assertIsNone(re.search(r"\d", stripped), "the template must not contain measured or example figures")
+
+
 class RoadmapTest(unittest.TestCase):
     def setUp(self):
         self.fs = G.findings()

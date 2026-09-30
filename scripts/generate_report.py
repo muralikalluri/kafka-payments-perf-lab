@@ -467,8 +467,12 @@ def extended_scope(runs: dict) -> list:
         ("Gatling scenarios", exists("load", "gatling", "pom.xml"), "load/gatling/"),
         ("Distributed tracing to Jaeger", "jaeger" in compose.lower(), "docker-compose.yml"),
         ("JFR recordings and flame graphs", exists("scripts", "flamegraph.py"), "scripts/flamegraph.py"),
-        ("PDF export of the reports", exists("scripts", "export_pdf.js"), "scripts/export_pdf.js"),
-        ("Reusable report template folder", exists("report", "template", "REPORT_TEMPLATE.md"), "report/template/"),
+        ("PDF export of the reports", exists("scripts", "export_pdf.js") and exists("scripts", "pdf-style.css")
+         and exists("sample-deliverable", "AUDIT_REPORT_SAMPLE.pdf") and exists("sample-deliverable", "QUICK_AUDIT_ledger-service.pdf"),
+         "scripts/export_pdf.js, sample-deliverable/*.pdf"),
+        ("Reusable report template folder", exists("report", "template", "REPORT_TEMPLATE.md")
+         and exists("report", "template", "QUICK_AUDIT_TEMPLATE.md") and exists("report", "template", "README.md"),
+         "report/template/"),
     ]
 
 

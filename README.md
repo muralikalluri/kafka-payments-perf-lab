@@ -90,7 +90,7 @@ Results land in `results/<date>_<profile>_<scenario>/` (`result.json`, `summary.
 - Micrometer metrics, Prometheus, Kafka and Postgres exporters and one provisioned Grafana dashboard, with per-stage metric snapshots stored beside each result.
 - Distributed tracing (OpenTelemetry to Jaeger) that follows one payment across the services, through the Kafka hops and the outbox publishers. Sampling is off during benchmarks; give the services a `TRACING_SAMPLING` fraction to see traces in the Jaeger UI at `localhost:16686`.
 - Query-plan evidence (`EXPLAIN (ANALYZE, BUFFERS)`) captured after every run.
-- A sample audit report and a single-service quick audit, generated from the results with a lint that rejects any hand-typed number.
+- A sample audit report and a single-service quick audit, generated from the results with a lint that rejects any hand-typed number; both export to PDF (`scripts/export_pdf.js`, pandoc and headless Chrome), and `report/template/` holds the fill-in version for real client work.
 
 The findings covered: F-01 producer batching, F-03 consumer concurrency, F-04 batch ledger writes, F-06 indexes, F-07 outbox and pool sizing, F-08 N+1 queries, F-12 record key and partitions, F-13 distributed account cache.
 
@@ -135,10 +135,10 @@ Built to the MVP cut in [SPEC.md](SPEC.md) first, then the items SPEC marks Late
 | Gatling scenarios | done | load/gatling/ |
 | Distributed tracing to Jaeger | done | docker-compose.yml |
 | JFR recordings and flame graphs | done | scripts/flamegraph.py |
-| PDF export of the reports | not built | scripts/export_pdf.js |
-| Reusable report template folder | not built | report/template/ |
+| PDF export of the reports | done | scripts/export_pdf.js, sample-deliverable/*.pdf |
+| Reusable report template folder | done | report/template/ |
 
-Not built (marked Later in SPEC.md): PDF export of the reports; Reusable report template folder.
+Everything marked Later in SPEC.md has been built.
 
 Known gaps in what was built: no load shedding on the gateway outbox backlog; some results predate the per-stage metric snapshots (consumer lag, CPU, garbage collection, connection pools, locks), so those runs have none stored; FX rates are cached in process rather than in Redis; connection-pool sizes are unswept lab choices; the cache accepts bounded staleness (a blocked account can be approved until its cached copy is invalidated or expires).
 

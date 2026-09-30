@@ -1,6 +1,9 @@
 {
   "name": "record-grafana",
   "private": true,
-  "description": "Dev tool: screenshots the provisioned Grafana dashboard while a benchmark runs (used to make the README GIF).",
-  "dependencies": { "puppeteer": "^24.0.0" }
+  "description": "Dev tools: dashboard screenshots for the README GIF (record.js) and PDF export of the reports (../export_pdf.js).",
+  "dependencies": {
+    "puppeteer": "^24.0.0",
+    "mermaid": "^11.0.0"
+  }
 }
