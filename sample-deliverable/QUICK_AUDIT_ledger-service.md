@@ -10,7 +10,7 @@ Read the service's code and configuration as found (the baseline profile), trace
 
 ## Findings
 
-7 findings, ordered by expected value. Where a finding corresponds to one in the full report, its identifier is given in brackets; the others are specific to this service.
+The review found 7 findings, ordered by expected value. Where a finding corresponds to one in the full report, its identifier is given in brackets; the others are specific to this service.
 
 ### Q-A (F-04) One transaction and many round trips per record
 

@@ -8,9 +8,9 @@
 
 **Target.** This is a sample, so there is no client-specific target. The target used throughout is the objective in section 2 (end-to-end p99 under {{slo.p99_ms}} ms, HTTP error rate under {{slo.error_rate}}, no dropped iterations) at the offered rates of the steady scenario.
 
-**Capacity as found.** The baseline pipeline met the objective at every offered rate up to {{fact.baseline_pass}} req/s and missed it at {{fact.baseline_fail}} req/s. The true limit lies between those steps.
+**Capacity as found.** Under the stepped load, {{fact.baseline_capacity}}
 
-**After tuning.** With all {{fact.findings_count}} changes applied, the tuned pipeline met the objective up to {{fact.tuned_pass}} req/s and missed it at {{fact.tuned_fail}} req/s{{fact.tuned_fail_source}}; again the limit lies between those steps. {{fact.ranges_sentence}}
+**After tuning.** With all {{fact.findings_count}} changes applied, {{fact.tuned_capacity}}{{fact.tuned_fail_source}} {{fact.ranges_sentence}}
 
 **Spike behaviour.** The burst raised the offered rate from {{fact.spike_base_rate}} to {{fact.spike_burst_rate}} req/s for {{fact.spike_burst_seconds}} s. Baseline result: {{fact.spike_baseline}}. Tuned result: {{fact.spike_tuned}}. {{fact.tuned_spike_caveat}}
 
@@ -155,7 +155,7 @@ These are separate from the performance findings: they concern how the system is
 
 ## 7. Prioritised remediation roadmap
 
-Impact is assessed on a scale of {{fact.impact_scale}} and effort is S, M or L; quadrants use an impact of {{fact.impact_high}} or more as high and effort S as small. Where the score and the recommended order disagree (F-03 scores as a quick win but only pays off after F-12 and F-07), the sequenced plan follows the dependency.
+Impact is assessed on a scale of {{fact.impact_scale}} and effort is S, M or L; quadrants use an impact of {{fact.impact_high}} or more as high and effort S as small. {{fact.score_order_note}}
 
 {{block.matrix}}
 
@@ -189,22 +189,22 @@ Impact is assessed on a scale of {{fact.impact_scale}} and effort is S, M or L; 
 
 **Reading these tables.**
 - {{fact.low_load_latency}}
-- Higher steps in the baseline column are dominated by queueing; the numbers there describe an overloaded pipeline, not its service time. Baseline steps are also not independent, because its cost grows as the tables fill during a run.
+- {{fact.queueing_note}}
 - Additional tuned runs with higher step lists, kept as recorded:
 
 {{table.extra_runs}}
 
 ## 9. Limits of this evidence
 
-- One machine, one run per data point, load generator and services sharing the host. Differences at the level of a step are meaningful; small differences are not.
+- One machine, most data points from a single run, load generator and services sharing the host. Differences at the level of a step are meaningful; small differences are not.
 - The limits are known only to step resolution, so any ratio is a range. The offered rate at which dropped iterations appear reflects latency backing up into the load generator; host contention may contribute and was not isolated.
 - Only the combination of all {{fact.findings_count}} changes was measured. The per-finding impact in section 7 is an informed assessment. An ablation (tuned with one change reverted) is the way to measure each one and is recommended before investing in the larger items.
 - No consumer lag, CPU, garbage-collection or lock-wait data was captured, so which stage limits either profile is not established. The dashboard exists (`grafana/dashboards`) but no snapshots were stored with the results.
-- An earlier recording of the baseline spike scenario, made before the baseline-affecting fixes, did recover within the window; the current one did not. The difference was not attributed to a cause and may be run-to-run variance.
+- {{fact.earlier_spike_note}}
 - The query plans were captured after the runs at different table sizes.
 - Replays of an earlier idempotency key create no payment, so payments created are about {{fact.payment_share}} of the requests sent in the steady and spike runs.
 
-## Appendix A. Tuned configuration (as recorded with the run)
+## Appendix A. Tuned configuration (as recorded with the run; comment lines removed by the recorder)
 
 {{block.tuned_config}}
 

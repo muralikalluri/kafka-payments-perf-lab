@@ -107,14 +107,14 @@ def quadrant(f: dict) -> str:
 
 
 def matrix_points(fs: list) -> list:
-    """(id, x, y) with y centred on the high/low impact boundary and points nudged apart when they coincide."""
+    """(id, x, y) with y centred on the high/low impact boundary and points with the same score nudged apart along x only, so equal impact stays equal on the chart."""
     points, seen = [], {}
     for f in fs:
         x = EFFORT_X[f["effort"]]
         y = round(0.5 + (f["impact"] - (IMPACT_HIGH - 0.5)) * 0.2, 2)
         n = seen.get((x, y), 0)
         seen[(x, y)] = n + 1
-        points.append((f["id"], round(x + 0.07 * n, 2), round(y - 0.04 * n, 2)))
+        points.append((f["id"], round(x + 0.07 * n, 2), y))
     return points
 
 
@@ -200,9 +200,9 @@ def correctness_sentence(runs: dict) -> str:
                    and r.result["invariants"]["non_terminal_payments"] == 0)]
     if not bad:
         return (f"Across all {len(runs)} recorded runs ({total:,} payments created in total), no balance went negative, "
-                "debits equalled credits, and every payment reached a terminal state (section 4).")
+                "debits equalled credits, and every payment reached a terminal state (sections 4 and 8).")
     return (f"**Correctness invariants failed in {len(bad)} of {len(runs)} recorded runs** ({', '.join(bad)}); "
-            "performance figures from those runs must not be relied on (section 4).")
+            "performance figures from those runs must not be relied on (sections 4 and 8).")
 
 
 def low_load_sentence(runs: dict, b_fail, t_pass) -> str:
@@ -228,6 +228,65 @@ def migration_note(runs: dict) -> str:
             "unrecovered spike's recovery value from `recovery_seconds_after_burst` to `recovery_at_least_seconds` after "
             "the collector was changed to record it that way. The change is recorded in that file under "
             "`result_migrations`; no measured value was altered.")
+
+
+def capacity_sentence(label: str, passed, failed) -> str:
+    if passed is None:
+        return f"the {label} pipeline did not meet the objective at any offered step."
+    if failed is None:
+        return (f"the {label} pipeline met the objective at every offered step, up to {passed} req/s; "
+                "the step lists did not find its limit.")
+    return (f"the {label} pipeline met the objective at every offered rate up to {passed} req/s and missed it at "
+            f"{failed} req/s. The true limit lies between those steps.")
+
+
+def ranges_sentence(b_fail, t_pass) -> str:
+    if b_fail is None or t_pass is None:
+        return "The step lists did not bracket both limits, so no comparison of sustained load is made here."
+    if b_fail <= t_pass:
+        return ("The two step ranges do not overlap, so the tuned profile sustains a clearly higher load, but the "
+                "step lists are coarse and this report deliberately gives no single \"times faster\" figure.")
+    return "The step ranges overlap, so the data does not show a clear difference in sustained load."
+
+
+def spike_caveat(runs: dict, t_pass) -> str:
+    spike = runs["tuned_spike"]
+    burst = spike.result["params"]["burst_req_per_s"]
+    if not spike.result["spike"]["recovered_within_run"]:
+        return "The tuned pipeline had not recovered by the end of the run, so its behaviour after the burst is not established."
+    if t_pass is not None and burst < t_pass:
+        return ("The burst rate is below the highest step the tuned profile sustained in the steady runs, so the tuned "
+                "system was never overloaded by the burst: this shows no degradation under the same load, not a faster "
+                "recovery.")
+    return "The burst rate reached or exceeded the tuned profile's sustained rate."
+
+
+def earlier_spike_note(runs: dict) -> str:
+    recovered = runs["baseline_spike"].result["spike"]["recovered_within_run"]
+    if recovered:
+        return ("An earlier recording of the baseline spike scenario (commit `eecb939`), made before the "
+                "baseline-affecting fixes, also recovered within the window; the two recordings' recovery times are "
+                "not compared here.")
+    return ("An earlier recording of the baseline spike scenario (commit `eecb939`), made before the baseline-affecting "
+            "fixes, did recover within the window; the current one did not. The difference was not attributed to a "
+            "cause and may be run-to-run variance.")
+
+
+def score_order_note(fs: list) -> str:
+    odd = [f for f in fs if quadrant(f) == "Quick win" and f["plan"] != "Quick wins" and f["depends_on"]]
+    if not odd:
+        return ""
+    parts = [f"{f['id']} scores as a quick win but depends on {', '.join(f['depends_on'])}" for f in odd]
+    return "Where the score and the recommended order disagree (" + "; ".join(parts) + "), the sequenced plan follows the dependency."
+
+
+def queueing_note(runs: dict) -> str:
+    b = runs.get("baseline_steady")
+    if b and any((not p["meets_slo"]) and p["e2e_ms"]["p50"] > SLO_P99_MS for p in b.phases):
+        return ("Steps that missed the objective in the baseline column are dominated by queueing: those numbers describe an "
+                "overloaded pipeline, not its service time. Baseline steps are also not independent, because its cost grows as "
+                "the tables fill during a run.")
+    return "Baseline steps are not independent, because its cost grows as the tables fill during a run."
 
 
 def payment_share(runs: dict) -> str:
@@ -284,11 +343,10 @@ def build_values(runs: dict) -> dict:
         "fact.service_count": str(service_count()),
         "fact.findings_count": str(len(fs)),
         "fact.impact_scale": f"1 to {IMPACT_MAX}", "fact.impact_high": str(IMPACT_HIGH),
-        "fact.baseline_pass": str(b_pass), "fact.baseline_fail": str(b_fail),
-        "fact.tuned_pass": str(t_pass), "fact.tuned_fail": str(t_fail),
-        "fact.tuned_fail_source": (f" (offered only in the additional run `{fail_source}`)"
-                                   if fail_source and fail_source != "2026-09-30_tuned_steady"
-                                   and not fail_source.endswith("tuned_steady") else ""),
+        "fact.baseline_capacity": capacity_sentence("baseline", b_pass, b_fail),
+        "fact.tuned_capacity": capacity_sentence("tuned", t_pass, t_fail),
+        "fact.tuned_fail_source": (f" The step that missed it was offered only in the additional run `{fail_source}`."
+                                   if fail_source and not fail_source.endswith("tuned_steady") else ""),
         "fact.extra_run_count": str(len(extra)),
         "fact.cold_first_step": L.cold_first_step_note(runs) or "No first-step warm-up effect was observed.",
         "fact.spike_baseline": L.spike_recovery_text(runs["baseline_spike"]),
@@ -296,16 +354,11 @@ def build_values(runs: dict) -> dict:
         "fact.spike_burst_rate": str(spike["burst_req_per_s"]),
         "fact.spike_burst_seconds": str(spike["burst_seconds"]),
         "fact.spike_base_rate": str(spike["base_req_per_s"]),
-        "fact.tuned_spike_caveat": (
-            "The burst rate is below the highest step the tuned profile sustained in the steady runs, so the tuned "
-            "system was never overloaded by the burst: this shows no degradation under the same load, not a faster "
-            "recovery." if spike["burst_req_per_s"] < (t_pass or 0)
-            else "The burst rate reached or exceeded the tuned profile's sustained rate."),
-        "fact.ranges_sentence": (
-            "The two step ranges do not overlap, so the tuned profile sustains a clearly higher load, but the step "
-            "lists are coarse and this report deliberately gives no single \"times faster\" figure."
-            if (b_fail is not None and t_pass is not None and b_fail <= t_pass)
-            else "The step ranges overlap, so the data does not show a clear difference in sustained load."),
+        "fact.tuned_spike_caveat": spike_caveat(runs, t_pass),
+        "fact.ranges_sentence": ranges_sentence(b_fail, t_pass),
+        "fact.earlier_spike_note": earlier_spike_note(runs),
+        "fact.score_order_note": score_order_note(fs),
+        "fact.queueing_note": queueing_note(runs),
         "fact.correctness": correctness_sentence(runs),
         "fact.migration_note": migration_note(runs),
         "fact.low_load_latency": low_load_sentence(runs, b_fail, t_pass),

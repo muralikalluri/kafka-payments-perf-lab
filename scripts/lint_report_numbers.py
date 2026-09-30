@@ -15,6 +15,7 @@ import json
 import os
 import re
 import sys
+import unicodedata
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
@@ -24,14 +25,15 @@ ALLOWED = [
     r"\bF-(?:0[1-9]|1[0-3])\b", r"\bADR-000[1-9]\b", r"\bM[0-7]\b", r"\bQ-[A-G]\b",
     r"\b[Ss]ections? [1-9]\b", r"\bAppendix [A-C]\b",
     r"\bdouble-entry\b", r"\bp(?:50|95|99)\b", r"\blz4\b", r"\bN\+1\b", r"\bSHA-256\b", r"\bUUIDv5\b",
-    r"\bHTTP (?:202|404|422|503)\b", r"\banswers 503\b", r"\bpacs\.008\b",
-    r"^\s*\d+\.\s", r"^#{1,4} (?:[1-9]\d?\. |Appendix [A-C]\. )",
+    r"\bHTTP (?:202|404|422|503)\b(?!\s*(?:req|ms|s\b|/))", r"\banswers 503\b(?!\s*(?:req|ms|s\b|/))", r"\bpacs\.008\b",
+    r"^\s*\d{1,2}\.\s", r"^#{1,4} (?:[1-9]\. |Appendix [A-C]\. )",
 ]
 
 NUMBER_WORDS = (
     "two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|"
     "twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|dozen|"
-    "percent|per cent|fold|twice|thrice|double|triple|half|quarter|times"
+    "seventeen|eighteen|nineteen|hundreds|thousands|dozens|zero|percent|per cent|twice|thrice|double|triple|"
+    "doubled|tripled|quadrupled|halved|half|halves|quarter|third|times|order of magnitude|\\w*fold"
 )
 NUMBER_WORD_RE = re.compile(rf"\b(?:{NUMBER_WORDS})\b", re.I)
 
@@ -53,11 +55,19 @@ def strip(text: str) -> str:
     return "\n".join(out)
 
 
+def _numeric_char(line: str):
+    """Any character Unicode considers a number (superscripts, Roman numeral signs, fractions ...)."""
+    for ch in line:
+        if unicodedata.numeric(ch, None) is not None:
+            return re.match(re.escape(ch), ch)
+    return None
+
+
 def lint_text(text: str, name: str) -> list:
     problems = []
     original = text.splitlines()
     for i, line in enumerate(strip(text).splitlines()):
-        found = re.search(r"\d", line) or NUMBER_WORD_RE.search(line)
+        found = re.search(r"\d", line) or NUMBER_WORD_RE.search(line) or _numeric_char(line)
         if found:
             src = original[i] if i < len(original) else line
             problems.append(f"{name}:{i + 1}: number in prose ({found.group(0)!r}); use a generated placeholder: {src.strip()[:90]}")

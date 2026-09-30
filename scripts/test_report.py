@@ -33,7 +33,8 @@ class LintTest(unittest.TestCase):
             "About twelve hundred requests.",
             "Roughly ninety percent of requests.",
             "Half of all traffic.",
-            "A twofold gain, or double the rate.",
+            "A twofold gain.", "A tenfold burst.", "About seventeen of them.", "Hundreds of payments.",
+            "It doubled overnight.", "An order of magnitude more.", "Only a third of them.",
         ]:
             self.assertFlagged(text + "\n")
 
@@ -48,6 +49,9 @@ class LintTest(unittest.TestCase):
             "Kafka 3.7 was used.",                 # version numbers
             "See F-1200 for details.",             # bogus finding id
             "| Header | 1200 |\n|---|---|\n| cell | 12 |",  # table cells
+            "The gateway answers 503 req/s.", "HTTP 503 ms latency.",  # status-code exemption must not hide figures
+            "1200. requests were served.",          # list-number exemption limited to short numbers
+            "## 99. heading", "Cost was 5\u00b2 units.", "Section \u216b applies.",  # unicode numerals
         ]:
             self.assertFlagged(text + "\n")
 
@@ -138,8 +142,52 @@ class FactsTest(unittest.TestCase):
         self.assertIn("did not show", G.low_load_sentence(flipped, b_fail, t_pass))
 
     def test_ranges_sentence_is_conditional(self):
-        values = G.build_values(self.runs)
-        self.assertIn("do not overlap", values["fact.ranges_sentence"])
+        b_pass, b_fail = L.steady_bounds(self.runs, "baseline")
+        t_pass, _ = L.steady_bounds(self.runs, "tuned")
+        self.assertIn("do not overlap", G.ranges_sentence(b_fail, t_pass))
+        self.assertIn("overlap", G.ranges_sentence(400, 200).replace("do not overlap", ""))  # overlapping ranges
+        self.assertIn("did not bracket", G.ranges_sentence(None, t_pass))
+        self.assertIn("did not bracket", G.ranges_sentence(b_fail, None))
+
+    def test_capacity_sentences_never_print_none(self):
+        for passed, failed in [(None, None), (None, 100), (200, None), (200, 400)]:
+            text = G.capacity_sentence("baseline", passed, failed)
+            self.assertNotIn("None", text)
+        self.assertIn("did not find its limit", G.capacity_sentence("tuned", 800, None))
+        self.assertIn("any offered step", G.capacity_sentence("tuned", None, 100))
+
+    def test_bounds_follow_meets_slo(self):
+        mutated = copy.deepcopy(self.runs)
+        for phase in mutated["baseline_steady"].phases:
+            if phase["target_req_per_s"] == 400:
+                phase["meets_slo"] = True
+        passed, failed = L.steady_bounds(mutated, "baseline")
+        self.assertEqual((passed, failed), (400, 800))
+
+    def test_spike_statements_follow_the_data(self):
+        mutated = copy.deepcopy(self.runs)
+        spike = mutated["baseline_spike"].result["spike"]
+        spike["recovered_within_run"], spike["recovery_seconds_after_burst"] = True, 42.0
+        self.assertIn("also recovered", G.earlier_spike_note(mutated))
+        self.assertIn("42 s after", L.spike_recovery_text(mutated["baseline_spike"]))
+        self.assertIn("the current one did not", G.earlier_spike_note(self.runs))
+        tuned = copy.deepcopy(self.runs)
+        tuned["tuned_spike"].result["spike"]["recovered_within_run"] = False
+        self.assertIn("had not recovered", G.spike_caveat(tuned, 800))
+        self.assertIn("never overloaded", G.spike_caveat(self.runs, 800))
+        self.assertIn("reached or exceeded", G.spike_caveat(self.runs, 100))
+
+    def test_queueing_note_is_conditional(self):
+        self.assertIn("dominated by queueing", G.queueing_note(self.runs))
+        calm = copy.deepcopy(self.runs)
+        for phase in calm["baseline_steady"].phases:
+            phase["meets_slo"] = True
+        self.assertNotIn("dominated by queueing", G.queueing_note(calm))
+
+    def test_score_order_note_names_only_real_disagreements(self):
+        self.assertIn("F-03", G.score_order_note(G.findings()))
+        agreed = [dict(f, depends_on=[]) for f in G.findings()]
+        self.assertEqual(G.score_order_note(agreed), "")
 
 
 class RoadmapTest(unittest.TestCase):

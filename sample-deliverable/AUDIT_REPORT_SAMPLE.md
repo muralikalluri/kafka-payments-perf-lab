@@ -8,13 +8,13 @@
 
 **Target.** This is a sample, so there is no client-specific target. The target used throughout is the objective in section 2 (end-to-end p99 under 500 ms, HTTP error rate under 0.1%, no dropped iterations) at the offered rates of the steady scenario.
 
-**Capacity as found.** The baseline pipeline met the objective at every offered rate up to 200 req/s and missed it at 400 req/s. The true limit lies between those steps.
+**Capacity as found.** Under the stepped load, the baseline pipeline met the objective at every offered rate up to 200 req/s and missed it at 400 req/s. The true limit lies between those steps.
 
-**After tuning.** With all 8 changes applied, the tuned pipeline met the objective up to 800 req/s and missed it at 1200 req/s (offered only in the additional run `2026-09-30_tuned_steady_extended`); again the limit lies between those steps. The two step ranges do not overlap, so the tuned profile sustains a clearly higher load, but the step lists are coarse and this report deliberately gives no single "times faster" figure.
+**After tuning.** With all 8 changes applied, the tuned pipeline met the objective at every offered rate up to 800 req/s and missed it at 1200 req/s. The true limit lies between those steps. The step that missed it was offered only in the additional run `2026-09-30_tuned_steady_extended`. The two step ranges do not overlap, so the tuned profile sustains a clearly higher load, but the step lists are coarse and this report deliberately gives no single "times faster" figure.
 
 **Spike behaviour.** The burst raised the offered rate from 50 to 500 req/s for 60 s. Baseline result: not recovered within the observed window (the recovery phase lasted 120 s); the true recovery time is unknown. Tuned result: no degradation was observed, and payments created after the burst all met the SLO. The burst rate is below the highest step the tuned profile sustained in the steady runs, so the tuned system was never overloaded by the burst: this shows no degradation under the same load, not a faster recovery.
 
-**Correctness.** Across all 8 recorded runs (662,316 payments created in total), no balance went negative, debits equalled credits, and every payment reached a terminal state (section 4).
+**Correctness.** Across all 8 recorded runs (662,316 payments created in total), no balance went negative, debits equalled credits, and every payment reached a terminal state (sections 4 and 8).
 
 **Top 3 fixes** by assessed impact, then effort, then risk: F-04, F-06, F-03 (needs F-12, F-07 first). Ranked by impact against effort (section 7): quick wins F-03, F-06; major projects F-04, F-07, F-12. The recommended order differs from the ranking because of dependencies (for example, more consumer threads only help after more partitions and larger pools); section 7 gives the order.
 
@@ -191,7 +191,7 @@ These are separate from the performance findings: they concern how the system is
 
 ## 7. Prioritised remediation roadmap
 
-Impact is assessed on a scale of 1 to 5 and effort is S, M or L; quadrants use an impact of 4 or more as high and effort S as small. Where the score and the recommended order disagree (F-03 scores as a quick win but only pays off after F-12 and F-07), the sequenced plan follows the dependency.
+Impact is assessed on a scale of 1 to 5 and effort is S, M or L; quadrants use an impact of 4 or more as high and effort S as small. Where the score and the recommended order disagree (F-03 scores as a quick win but depends on F-12, F-07), the sequenced plan follows the dependency.
 
 ```mermaid
 quadrantChart
@@ -205,10 +205,10 @@ quadrantChart
     F-01: [0.20, 0.20]
     F-03: [0.20, 0.60]
     F-04: [0.62, 0.80]
-    F-06: [0.27, 0.56]
+    F-06: [0.27, 0.60]
     F-07: [0.62, 0.60]
-    F-08: [0.27, 0.16]
-    F-12: [0.69, 0.56]
+    F-08: [0.27, 0.20]
+    F-12: [0.69, 0.60]
     F-13: [0.85, 0.40]
 ```
 
@@ -290,7 +290,7 @@ quadrantChart
 
 **Reading these tables.**
 - The tuned profile has a higher median end-to-end latency than the baseline at low load (the smoke run and the lowest steady step). The likely causes are the outbox polling on the gateway and the ledger and producer lingering, but that was not verified. It is a real trade-off: a higher latency floor at low load in exchange for capacity at high load.
-- Higher steps in the baseline column are dominated by queueing; the numbers there describe an overloaded pipeline, not its service time. Baseline steps are also not independent, because its cost grows as the tables fill during a run.
+- Steps that missed the objective in the baseline column are dominated by queueing: those numbers describe an overloaded pipeline, not its service time. Baseline steps are also not independent, because its cost grows as the tables fill during a run.
 - Additional tuned runs with higher step lists, kept as recorded:
 
 | Run | First step | Offered (req/s) | Achieved (req/s) | POST p99 | End-to-end p50 | End-to-end p99 | Dropped iterations | SLO met |
@@ -306,15 +306,15 @@ quadrantChart
 
 ## 9. Limits of this evidence
 
-- One machine, one run per data point, load generator and services sharing the host. Differences at the level of a step are meaningful; small differences are not.
+- One machine, most data points from a single run, load generator and services sharing the host. Differences at the level of a step are meaningful; small differences are not.
 - The limits are known only to step resolution, so any ratio is a range. The offered rate at which dropped iterations appear reflects latency backing up into the load generator; host contention may contribute and was not isolated.
 - Only the combination of all 8 changes was measured. The per-finding impact in section 7 is an informed assessment. An ablation (tuned with one change reverted) is the way to measure each one and is recommended before investing in the larger items.
 - No consumer lag, CPU, garbage-collection or lock-wait data was captured, so which stage limits either profile is not established. The dashboard exists (`grafana/dashboards`) but no snapshots were stored with the results.
-- An earlier recording of the baseline spike scenario, made before the baseline-affecting fixes, did recover within the window; the current one did not. The difference was not attributed to a cause and may be run-to-run variance.
+- An earlier recording of the baseline spike scenario (commit `eecb939`), made before the baseline-affecting fixes, did recover within the window; the current one did not. The difference was not attributed to a cause and may be run-to-run variance.
 - The query plans were captured after the runs at different table sizes.
 - Replays of an earlier idempotency key create no payment, so payments created are about 90% of the requests sent in the steady and spike runs.
 
-## Appendix A. Tuned configuration (as recorded with the run)
+## Appendix A. Tuned configuration (as recorded with the run; comment lines removed by the recorder)
 
 **payment-gateway** (`payment-gateway-tuned.yml`, comments removed by the recorder)
 
