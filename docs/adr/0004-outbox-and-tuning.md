@@ -57,3 +57,9 @@ that holds for the two outbox publishers, not for validation.
 The drain lock-order fix (commit 711e322) adds two small queries on `pending_payments` to every baseline
 record. It is a correctness fix that applies to both profiles, so it is part of the baseline cost the
 before/after comparison starts from.
+
+## Addendum: the baseline grew after the MVP
+The rule "the baseline config stays untouched" held for the MVP findings. The findings marked Later (F-02, F-05, F-09, F-10,
+F-11) each needed a new baseline anti-pattern, because the baseline had been quietly fixed in those respects (for example,
+current Kafka clients default to idempotent producers). Each is added behind a default-off flag or an explicit
+`*-baseline.yml` setting, together with its tuned fix in the same commit, and results recorded before them were re-recorded.

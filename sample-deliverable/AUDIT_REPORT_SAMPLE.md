@@ -10,13 +10,13 @@
 
 **Capacity as found.** Under the stepped load, the baseline pipeline met the objective at every offered rate up to 200 req/s and missed it at 400 req/s. The true limit lies between those steps.
 
-**After tuning.** With all 8 changes applied, the tuned pipeline met the objective at every offered rate up to 800 req/s and missed it at 1200 req/s. The true limit lies between those steps. The step that missed it was offered only in the additional run `2026-09-30_tuned_steady_extended`. The two step ranges do not overlap, so the tuned profile sustains a clearly higher load, but the step lists are coarse, so no single "times faster" figure is given.
+**After tuning.** With all 13 changes applied, the tuned pipeline met the objective at every offered rate up to 800 req/s and missed it at 1200 req/s. The true limit lies between those steps. The step that missed it was offered only in the additional run `2026-09-30_tuned_steady_extended`. The two step ranges do not overlap, so the tuned profile sustains a clearly higher load, but the step lists are coarse, so no single "times faster" figure is given.
 
 **Spike behaviour.** The burst raised the offered rate from 50 to 500 req/s for 60 s. Baseline result: not recovered within the observed window (the recovery phase lasted 120 s); the true recovery time is unknown. Tuned result: no degradation was observed, and payments created after the burst all met the SLO. The burst rate is below the highest step the tuned profile sustained in the steady runs, so the tuned system was never overloaded by the burst: this shows no degradation under the same load, not a faster recovery.
 
 **Correctness.** Across all 10 recorded runs (729,781 payments created in total), no balance went negative, debits equalled credits, and every payment reached a terminal state (sections 4 and 8).
 
-**Top 3 fixes** by assessed impact, then effort, then risk: F-04, F-06, F-03 (needs F-12, F-07 first). Ranked by impact against effort (section 7): quick wins F-03, F-06; major projects F-04, F-07, F-12. The recommended order differs from the ranking because of dependencies (for example, more consumer threads only help after more partitions and larger pools); section 7 gives the order.
+**Top 3 fixes** by assessed impact, then effort, then risk: F-04, F-06, F-03 (needs F-12, F-07 first). Ranked by impact against effort (section 7): quick wins F-03, F-06; major projects F-04, F-05, F-07, F-11, F-12. The recommended order differs from the ranking because of dependencies (for example, more consumer threads only help after more partitions and larger pools); section 7 gives the order.
 
 **Expected gain.** Only the combined effect was measured (the step ranges above). The gain from each change on its own was not isolated, so no per-fix gain is claimed.
 
@@ -117,6 +117,13 @@ Each finding lists the evidence available, the expected impact, a recommendation
 - **Recommendation.** Publish from an outbox with asynchronous sends and a callback, `linger.ms` around 10, a larger batch size (65536 bytes here) and lz4 compression. Do not linger where a consumer must wait for each acknowledgement before committing its offset (validation).
 - **Effort / risk.** S / Low. Partial send failures can reorder events; the ledger orders by sequence number, so this is safe here.
 
+### F-02 Producers allow one request in flight and no idempotence
+
+- **Evidence.** The baseline sets idempotence off and the in-flight request limit to 1, explicitly, in every producing service (`*-baseline.yml`); the tuned profile turns idempotence on and allows not recorded in flight. Recent clients default to idempotence with several requests in flight, so a real system has to be checked, not assumed. `ProducerConfigTest` reads the effective settings from the running services, and `DuplicateDeliveryTest` injects the same record more than once on every topic to show the consumers absorb it.
+- **Impact.** With acknowledgement from all in-sync replicas, a single request in flight per connection serialises produce round trips, so a busy producer is bounded by the round-trip time; without idempotence a retried send can write a duplicate. Assessed from the mechanism, not isolated; it matters most on a replicated cluster, where acknowledgement takes longer.
+- **Recommendation.** Enable idempotence and allow several requests in flight (order per partition is kept). It is not end-to-end exactly-once: it only suppresses duplicates within one producer session, so keep the consumer-side deduplication.
+- **Effort / risk.** S / Low.
+
 ### F-03 One consumer thread regardless of partition count
 
 - **Evidence.** The baseline runs 1 consumer thread per service over 3 partitions (`*-baseline.yml`); the tuned profile runs 12 consumer threads. `PartitioningTest` checks the consumer-group membership in both profiles.
@@ -130,6 +137,13 @@ Each finding lists the evidence available, the expected impact, a recommendation
 - **Impact.** Assessed highest: it multiplies statements and commits per payment on the stage that writes the most rows and takes account locks. This is a judgement from the mechanism; per-stage timings were not captured.
 - **Recommendation.** Batch listener with one ordered lock set per batch, in-memory application against the locked snapshot, dedup inside and across batches, and per-record fallback for poison messages, never dead-lettering a whole batch.
 - **Effort / risk.** M / High. This is the most delicate change: it must keep idempotency, sequence ordering and the balance invariant. It is covered by dedicated tests (duplicates, reordering, opposite transfers, a poison record, a database outage).
+
+### F-05 A blocking webhook call inside the status consumer
+
+- **Evidence.** The baseline gateway calls the client's webhook from inside the consumer that records final payment status (`BlockingWebhookNotifier`), after the status update has committed. In these runs the webhook simulator answers after about unknown ms, a lab parameter. `NotificationTest` shows a slow webhook delaying later status updates in the baseline but not in the tuned profile, and that a failing webhook never loses or doubles a status update in either.
+- **Impact.** With one consumer thread the rate of status updates is capped at one over the webhook's latency, a slow webhook delays every later update, and a run of slow calls can exceed the consumer's poll interval. Notification itself is at-most-once: a crash or a failed call loses it. Assessed high because it can cap the completed-payment rate of the whole pipeline; its share of the combined result was not isolated.
+- **Recommendation.** Take the call off the status path: a notification service reads the posted events in its own consumer group, stores them, and delivers with retries, backoff and a dead state, with the receiver deduplicating by payment identifier (at-least-once delivery, effectively once).
+- **Effort / risk.** M / Medium. Clients need idempotent receivers, and dead notifications need a repair process.
 
 ### F-06 Missing indexes
 
@@ -159,6 +173,34 @@ Each finding lists the evidence available, the expected impact, a recommendation
 - **Impact.** Extra queries per payment; small on its own once F-13 or a cache is in place.
 - **Recommendation.** One projection query joining accounts and their limit, an index on the limit table, and a short-lived in-process cache for the small, rarely changing rate table.
 - **Effort / risk.** S / Low.
+
+### F-09 A new JSON mapper per message and full payloads logged at info level
+
+- **Evidence.** The baseline builds a JSON mapper for every message and logs every event at info level with its full payload, in every service. `SerializationLoggingTest` counts the mappers built and captures the log events in both profiles.
+- **Impact.** Building a mapper costs far more than using one, and log volume grows with every message. Full payloads also put account identifiers and amounts into the logs, a data-protection problem whatever the speed. The speed effect is assessed as modest and was not isolated.
+- **Recommendation.** One shared, configured mapper; log identifiers at debug level and keep info for what an operator needs to see.
+- **Effort / risk.** S / Low.
+
+### F-10 Platform threads for blocking calls and default JVM sizing
+
+- **Evidence.** The baseline gateway serves requests on platform threads that block on the database and the broker, and every JVM runs with its defaults. The tuned profile serves requests on virtual threads (`ThreadingTest` counts requests by thread kind) and starts the JVMs with `unknown`. The services run on the host, not in containers, so this is a fixed heap rather than a container-aware percentage. The collectors compared on the same steady ladder:
+
+_(the comparison run is not recorded)_
+
+- **Impact.** Virtual threads make blocking calls cheap in the gateway, and a fixed heap avoids resizing pauses. Assessed as moderate and not isolated; the collector comparison is a single pair of runs.
+- **Recommendation.** Virtual threads for blocking request handling (watch for pinning under synchronized code), a heap sized from observed use, and a collector chosen from measurements rather than habit.
+- **Effort / risk.** S / Medium: pinning and native memory behaviour must be checked under the real workload.
+
+### F-11 Every posting locks one settlement account
+
+- **Evidence.** Every payment is posted through a settlement account (debtor to settlement to creditor). The baseline uses one settlement account for all payments (`SettlementAccounts`); the tuned profile picks one of 16 shard accounts per transaction from the source partition. `SettlementTest` shows every settlement account back at nothing after every commit, a fixed number of legs per posted payment, and the rejections for reserved and missing settlement accounts. The tuned profile against the tuned profile with only this change switched off (an ablation):
+
+_(the comparison run is not recorded)_
+
+- **Impact.** One account row locked by every payment serialises them as soon as more than one consumer thread runs, so the baseline (one consumer thread) cannot show it and the tuned profile can. Assessed high once concurrency is raised; the ablation above is the evidence for its size.
+- **Recommendation.** Shard hot transit accounts and choose the shard per transaction, not per payment, so a batch does not lock every shard. Add the shard to the same ordered lock set as the other accounts so no new deadlock is possible, and reconcile periodically.
+- **Trade-off.** The aggregate position must be read across shards. Because the settlement legs net out inside each transaction there is nothing to sweep; a reconciliation job records the position and warns if any shard is not at nothing.
+- **Effort / risk.** M / Medium.
 
 ### F-12 Records keyed by merchant on few partitions
 
@@ -208,12 +250,17 @@ quadrantChart
     quadrant-3 Fill-ins
     quadrant-4 Defer or avoid
     F-01: [0.20, 0.20]
+    F-02: [0.27, 0.20]
     F-03: [0.20, 0.60]
     F-04: [0.62, 0.80]
+    F-05: [0.62, 0.60]
     F-06: [0.27, 0.60]
-    F-07: [0.62, 0.60]
-    F-08: [0.27, 0.20]
-    F-12: [0.69, 0.60]
+    F-07: [0.69, 0.60]
+    F-08: [0.34, 0.20]
+    F-09: [0.41, 0.20]
+    F-10: [0.20, 0.40]
+    F-11: [0.76, 0.60]
+    F-12: [0.83, 0.60]
     F-13: [0.85, 0.40]
 ```
 
@@ -222,22 +269,32 @@ quadrantChart
 | F-04 | Ledger commits one record per transaction with one statement per round trip | Ledger writes | 5 of 5 | M | High | Major project |
 | F-06 | No indexes on the idempotency lookup and on the daily-outflow query | Database | 4 of 5 | S | Low | Quick win |
 | F-03 | One consumer thread per service regardless of partition count | Kafka consumer | 4 of 5 | S | Medium | Quick win |
+| F-05 | A blocking webhook call sits inside the status consumer | Consumer and integration | 4 of 5 | M | Medium | Major project |
 | F-07 | Gateway holds a connection and locks while it waits for the broker; pools left at defaults | Gateway and pools | 4 of 5 | M | Medium | Major project |
+| F-11 | Every posting locks one settlement account | Ledger contention | 4 of 5 | M | Medium | Major project |
 | F-12 | Records keyed by merchant on few partitions | Topic design | 4 of 5 | M | Medium | Major project |
+| F-10 | Platform threads for blocking calls and default JVM sizing | JVM | 3 of 5 | S | Medium | Fill-in |
 | F-13 | Every validation reads account status, limits and rates from Postgres | Caching | 3 of 5 | L | High | Defer or avoid |
 | F-01 | Producer sends one record at a time, synchronously, without batching or compression | Kafka producer | 2 of 5 | S | Low | Fill-in |
+| F-02 | Producers allow one request in flight and no idempotence | Kafka producer | 2 of 5 | S | Low | Fill-in |
 | F-08 | Validation loads limits with lazy per-account queries (N+1) | Validation reads | 2 of 5 | S | Low | Fill-in |
+| F-09 | A new JSON mapper per message and full payloads logged at info level | Serialization and logging | 2 of 5 | S | Low | Fill-in |
 
 **Sequenced plan.** The order respects dependencies within and across phases: partitions and pools before consumer threads, indexes before the outbox that relies on them, the outbox before asynchronous publishing, the projection query before the cache.
 
 | Sequence | ID | Change | Effort | Risk | Depends on |
 |---|---|---|---|---|---|
+| Quick wins | F-02 | Producers allow one request in flight and no idempotence | S | Low | none |
 | Quick wins | F-06 | No indexes on the idempotency lookup and on the daily-outflow query | S | Low | none |
 | Quick wins | F-08 | Validation loads limits with lazy per-account queries (N+1) | S | Low | none |
+| Quick wins | F-09 | A new JSON mapper per message and full payloads logged at info level | S | Low | none |
+| Next sprint | F-05 | A blocking webhook call sits inside the status consumer | M | Medium | none |
 | Next sprint | F-07 | Gateway holds a connection and locks while it waits for the broker; pools left at defaults | M | Medium | F-06 |
+| Next sprint | F-10 | Platform threads for blocking calls and default JVM sizing | S | Medium | none |
 | Next sprint | F-12 | Records keyed by merchant on few partitions | M | Medium | none |
 | Next sprint | F-01 | Producer sends one record at a time, synchronously, without batching or compression | S | Low | F-07 |
 | Next sprint | F-03 | One consumer thread per service regardless of partition count | S | Medium | F-12, F-07 |
+| Next sprint | F-11 | Every posting locks one settlement account | M | Medium | F-03 |
 | Structural | F-04 | Ledger commits one record per transaction with one statement per round trip | M | High | none |
 | Structural | F-13 | Every validation reads account status, limits and rates from Postgres | L | High | F-08 |
 
@@ -330,7 +387,7 @@ _(no broker-failure runs are recorded)_
 
 - One machine, most data points from a single run, load generator and services sharing the host. Differences at the level of a step are meaningful; small differences are not.
 - The limits are known only to step resolution, so any ratio is a range. The offered rate at which dropped iterations appear reflects latency backing up into the load generator; host contention may contribute and was not isolated.
-- Only the combination of all 8 changes was measured. The per-finding impact in section 7 is an informed assessment. An ablation (tuned with one change reverted) is the way to measure each one and is recommended before investing in the larger items.
+- Only the combination of all 13 changes was measured. The per-finding impact in section 7 is an informed assessment. An ablation (tuned with one change reverted) is the way to measure each one and is recommended before investing in the larger items.
 - No consumer lag, CPU, garbage-collection or lock-wait data was captured, so which stage limits either profile is not established. The dashboard exists (`grafana/dashboards`) but no snapshots were stored with the results.
 - An earlier recording of the baseline spike scenario (commit `eecb939`), made before the baseline-affecting fixes, recovered within the window; the standard recording used in the tables above did not. A further recording, taken while the dashboard was being captured (`2026-09-30_baseline_spike_recorded`), also recovered. The recordings disagree, which shows run-to-run variance in this scenario for the baseline; no cause was attributed and no single recovery time is claimed.
 - The query plans were captured after the runs at different table sizes.

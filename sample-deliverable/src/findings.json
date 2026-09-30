@@ -12,6 +12,16 @@
     ]
   },
   {
+    "id": "F-02",
+    "title": "Producers allow one request in flight and no idempotence",
+    "area": "Kafka producer",
+    "impact": 2,
+    "effort": "S",
+    "risk": "Low",
+    "plan": "Quick wins",
+    "depends_on": []
+  },
+  {
     "id": "F-03",
     "title": "One consumer thread per service regardless of partition count",
     "area": "Kafka consumer",
@@ -32,6 +42,16 @@
     "effort": "M",
     "risk": "High",
     "plan": "Structural",
+    "depends_on": []
+  },
+  {
+    "id": "F-05",
+    "title": "A blocking webhook call sits inside the status consumer",
+    "area": "Consumer and integration",
+    "impact": 4,
+    "effort": "M",
+    "risk": "Medium",
+    "plan": "Next sprint",
     "depends_on": []
   },
   {
@@ -65,6 +85,38 @@
     "risk": "Low",
     "plan": "Quick wins",
     "depends_on": []
+  },
+  {
+    "id": "F-09",
+    "title": "A new JSON mapper per message and full payloads logged at info level",
+    "area": "Serialization and logging",
+    "impact": 2,
+    "effort": "S",
+    "risk": "Low",
+    "plan": "Quick wins",
+    "depends_on": []
+  },
+  {
+    "id": "F-10",
+    "title": "Platform threads for blocking calls and default JVM sizing",
+    "area": "JVM",
+    "impact": 3,
+    "effort": "S",
+    "risk": "Medium",
+    "plan": "Next sprint",
+    "depends_on": []
+  },
+  {
+    "id": "F-11",
+    "title": "Every posting locks one settlement account",
+    "area": "Ledger contention",
+    "impact": 4,
+    "effort": "M",
+    "risk": "Medium",
+    "plan": "Next sprint",
+    "depends_on": [
+      "F-03"
+    ]
   },
   {
     "id": "F-12",

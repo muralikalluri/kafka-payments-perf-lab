@@ -86,6 +86,13 @@ Each finding lists the evidence available, the expected impact, a recommendation
 - **Recommendation.** Publish from an outbox with asynchronous sends and a callback, `linger.ms` around {{cfg.tuned_linger_ms}}, a larger batch size ({{cfg.tuned_batch_size}} bytes here) and lz4 compression. Do not linger where a consumer must wait for each acknowledgement before committing its offset (validation).
 - **Effort / risk.** S / Low. Partial send failures can reorder events; the ledger orders by sequence number, so this is safe here.
 
+### F-02 Producers allow one request in flight and no idempotence
+
+- **Evidence.** The baseline sets idempotence off and the in-flight request limit to {{cfg.baseline_in_flight}}, explicitly, in every producing service (`*-baseline.yml`); the tuned profile turns idempotence on and allows {{cfg.tuned_in_flight}} in flight. Recent clients default to idempotence with several requests in flight, so a real system has to be checked, not assumed. `ProducerConfigTest` reads the effective settings from the running services, and `DuplicateDeliveryTest` injects the same record more than once on every topic to show the consumers absorb it.
+- **Impact.** With acknowledgement from all in-sync replicas, a single request in flight per connection serialises produce round trips, so a busy producer is bounded by the round-trip time; without idempotence a retried send can write a duplicate. Assessed from the mechanism, not isolated; it matters most on a replicated cluster, where acknowledgement takes longer.
+- **Recommendation.** Enable idempotence and allow several requests in flight (order per partition is kept). It is not end-to-end exactly-once: it only suppresses duplicates within one producer session, so keep the consumer-side deduplication.
+- **Effort / risk.** S / Low.
+
 ### F-03 One consumer thread regardless of partition count
 
 - **Evidence.** The baseline runs {{cfg.baseline_concurrency}} consumer thread per service over {{cfg.baseline_partitions}} partitions (`*-baseline.yml`); the tuned profile runs {{cfg.tuned_concurrency}} consumer threads. `PartitioningTest` checks the consumer-group membership in both profiles.
@@ -99,6 +106,13 @@ Each finding lists the evidence available, the expected impact, a recommendation
 - **Impact.** Assessed highest: it multiplies statements and commits per payment on the stage that writes the most rows and takes account locks. This is a judgement from the mechanism; per-stage timings were not captured.
 - **Recommendation.** Batch listener with one ordered lock set per batch, in-memory application against the locked snapshot, dedup inside and across batches, and per-record fallback for poison messages, never dead-lettering a whole batch.
 - **Effort / risk.** M / High. This is the most delicate change: it must keep idempotency, sequence ordering and the balance invariant. It is covered by dedicated tests (duplicates, reordering, opposite transfers, a poison record, a database outage).
+
+### F-05 A blocking webhook call inside the status consumer
+
+- **Evidence.** The baseline gateway calls the client's webhook from inside the consumer that records final payment status (`BlockingWebhookNotifier`), after the status update has committed. In these runs the webhook simulator answers after about {{fact.webhook_latency}} ms, a lab parameter. `NotificationTest` shows a slow webhook delaying later status updates in the baseline but not in the tuned profile, and that a failing webhook never loses or doubles a status update in either.
+- **Impact.** With one consumer thread the rate of status updates is capped at one over the webhook's latency, a slow webhook delays every later update, and a run of slow calls can exceed the consumer's poll interval. Notification itself is at-most-once: a crash or a failed call loses it. Assessed high because it can cap the completed-payment rate of the whole pipeline; its share of the combined result was not isolated.
+- **Recommendation.** Take the call off the status path: a notification service reads the posted events in its own consumer group, stores them, and delivers with retries, backoff and a dead state, with the receiver deduplicating by payment identifier (at-least-once delivery, effectively once).
+- **Effort / risk.** M / Medium. Clients need idempotent receivers, and dead notifications need a repair process.
 
 ### F-06 Missing indexes
 
@@ -123,6 +137,34 @@ Each finding lists the evidence available, the expected impact, a recommendation
 - **Impact.** Extra queries per payment; small on its own once F-13 or a cache is in place.
 - **Recommendation.** One projection query joining accounts and their limit, an index on the limit table, and a short-lived in-process cache for the small, rarely changing rate table.
 - **Effort / risk.** S / Low.
+
+### F-09 A new JSON mapper per message and full payloads logged at info level
+
+- **Evidence.** The baseline builds a JSON mapper for every message and logs every event at info level with its full payload, in every service. `SerializationLoggingTest` counts the mappers built and captures the log events in both profiles.
+- **Impact.** Building a mapper costs far more than using one, and log volume grows with every message. Full payloads also put account identifiers and amounts into the logs, a data-protection problem whatever the speed. The speed effect is assessed as modest and was not isolated.
+- **Recommendation.** One shared, configured mapper; log identifiers at debug level and keep info for what an operator needs to see.
+- **Effort / risk.** S / Low.
+
+### F-10 Platform threads for blocking calls and default JVM sizing
+
+- **Evidence.** The baseline gateway serves requests on platform threads that block on the database and the broker, and every JVM runs with its defaults. The tuned profile serves requests on virtual threads (`ThreadingTest` counts requests by thread kind) and starts the JVMs with `{{fact.jvm_opts_tuned}}`. The services run on the host, not in containers, so this is a fixed heap rather than a container-aware percentage. The collectors compared on the same steady ladder:
+
+{{table.gc}}
+
+- **Impact.** Virtual threads make blocking calls cheap in the gateway, and a fixed heap avoids resizing pauses. Assessed as moderate and not isolated; the collector comparison is a single pair of runs.
+- **Recommendation.** Virtual threads for blocking request handling (watch for pinning under synchronized code), a heap sized from observed use, and a collector chosen from measurements rather than habit.
+- **Effort / risk.** S / Medium: pinning and native memory behaviour must be checked under the real workload.
+
+### F-11 Every posting locks one settlement account
+
+- **Evidence.** Every payment is posted through a settlement account (debtor to settlement to creditor). The baseline uses one settlement account for all payments (`SettlementAccounts`); the tuned profile picks one of {{cfg.settlement_shards}} shard accounts per transaction from the source partition. `SettlementTest` shows every settlement account back at nothing after every commit, a fixed number of legs per posted payment, and the rejections for reserved and missing settlement accounts. The tuned profile against the tuned profile with only this change switched off (an ablation):
+
+{{table.ablation_f11}}
+
+- **Impact.** One account row locked by every payment serialises them as soon as more than one consumer thread runs, so the baseline (one consumer thread) cannot show it and the tuned profile can. Assessed high once concurrency is raised; the ablation above is the evidence for its size.
+- **Recommendation.** Shard hot transit accounts and choose the shard per transaction, not per payment, so a batch does not lock every shard. Add the shard to the same ordered lock set as the other accounts so no new deadlock is possible, and reconcile periodically.
+- **Trade-off.** The aggregate position must be read across shards. Because the settlement legs net out inside each transaction there is nothing to sweep; a reconciliation job records the position and warns if any shard is not at nothing.
+- **Effort / risk.** M / Medium.
 
 ### F-12 Records keyed by merchant on few partitions
 

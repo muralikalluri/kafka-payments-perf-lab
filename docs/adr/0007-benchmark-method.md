@@ -27,3 +27,10 @@ Status: accepted (M3, M5)
   reported as such rather than dropped.
 - Migrating an old result file to a corrected schema is done by a script that records the change in the file
   (`scripts/normalize_results.py`); measured values are never edited.
+
+## Variant runs
+Runs of a modified setup are kept in their own result folders (a suffix on the folder name) and compared against the standard
+run in their own tables; they never feed the capacity bounds: broker failure (`failover-*`), profiling (`flame-*`), another
+garbage collector (`zgc`) and one tuned change switched off (`ablate-*`, through `BENCH_SERVICE_ENV`). An ablation is how the
+effect of a single finding is measured, because the combined tuned result cannot separate them. The load tool (k6 or Gatling),
+the soak duration and the JVM options are recorded in each run's `env.txt`.

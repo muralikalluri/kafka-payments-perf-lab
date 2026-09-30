@@ -124,6 +124,10 @@ def run_label(run: Run) -> str:
         label += " (brokers stopped during the load)"
     if is_profiled(run):
         label += " (profiled with Java Flight Recorder)"
+    if run.suffix == "zgc":
+        label += " (ZGC instead of G1)"
+    if run.suffix and run.suffix.startswith("ablate"):
+        label += " (one tuned change switched off)"
     return label
 
 
@@ -154,9 +158,18 @@ def is_profiled(run: Run) -> bool:
     return bool(run.suffix) and run.suffix.startswith("flame")
 
 
+VARIANT_PREFIXES = ("failover", "flame", "zgc", "ablate")
+
+
+def is_variant(run: Run) -> bool:
+    """A run of a modified setup (broker failure, profiling, another collector, one change switched off). It is compared
+    against the standard run in its own table and never feeds the capacity bounds."""
+    return bool(run.suffix) and run.suffix.startswith(VARIANT_PREFIXES)
+
+
 def is_ladder(run: Run) -> bool:
-    """A steady run that climbs a ladder of offered rates (standard or extended), not a fault-injection or profiling run."""
-    return run.scenario == "steady" and not is_failover(run) and not is_profiled(run)
+    """A steady run of the standard setup that climbs a ladder of offered rates (standard or extended)."""
+    return run.scenario == "steady" and not is_variant(run)
 
 
 def pass_through(run: Run):
@@ -501,3 +514,22 @@ def gatling_table(runs: dict) -> str:
         return "_(no Gatling runs are recorded)_"
     return table(["Profile", "Requests", "HTTP error rate", "POST p50", "POST p99", "End-to-end p50", "End-to-end p99",
                   "Invariants hold"], rows)
+
+
+def ladder_compare(runs: dict, key_a: str, key_b: str, label_a: str, label_b: str) -> str:
+    """Two steady runs with the same offered rates, side by side."""
+    a, b = runs.get(key_a), runs.get(key_b)
+    if not a or not b:
+        return "_(the comparison run is not recorded)_"
+    rows = []
+    for pa, pb in zip(a.phases, b.phases):
+        rows.append([rate(pa["target_req_per_s"]),
+                     ms(pa["e2e_ms"]["p50"]), ms(pa["e2e_ms"]["p99"]), yes_no(pa["meets_slo"]),
+                     ms(pb["e2e_ms"]["p50"]), ms(pb["e2e_ms"]["p99"]), yes_no(pb["meets_slo"])])
+    return table(["Offered (req/s)", f"{label_a} e2e p50", f"{label_a} e2e p99", f"{label_a} SLO",
+                  f"{label_b} e2e p50", f"{label_b} e2e p99", f"{label_b} SLO"], rows)
+
+
+def env_value(runs: dict, key: str, field: str, default: str = "unknown") -> str:
+    r = runs.get(key)
+    return r.env.get(field, default) if r else default

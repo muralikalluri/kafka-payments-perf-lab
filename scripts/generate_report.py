@@ -68,6 +68,9 @@ def cfg_facts(runs: dict) -> dict:
         "tuned_linger_ms": yml_int(tuned["payment-gateway"], "linger.ms"),
         "tuned_batch_size": yml_int(tuned["payment-gateway"], "batch-size"),
         "tuned_max_poll_records": yml_int(tuned["ledger-service"], "max-poll-records"),
+        "baseline_in_flight": yml_int(read_yml("payment-gateway", "baseline"), "max.in.flight.requests.per.connection"),
+        "tuned_in_flight": yml_int(tuned["payment-gateway"], "max.in.flight.requests.per.connection"),
+        "settlement_shards": yml_int(read_yml("ledger-service", "base") if False else open(os.path.join(L.ROOT, "services", "ledger-service", "src", "main", "resources", "ledger-service.yml")).read(), "shards"),
         "cache_ttl_seconds": yml_int(tuned["validation-service"], "ttl-seconds"),
     }
 
@@ -574,7 +577,7 @@ def build_values(runs: dict) -> dict:
     extra = [r for r in runs.values() if r.scenario == "steady" and r.suffix]
     smoke_vus = runs["baseline_smoke"].result["params"]["vus"]
     values = {f"env.{k}": str(v) for k, v in env.items()}
-    values.update({f"cfg.{k}": str(v) for k, v in cfg.items()})
+    values.update({f"cfg.{k}": ("not recorded" if v is None else str(v)) for k, v in cfg.items()})
     values.update({
         "slo.p99_ms": str(SLO_P99_MS), "slo.error_rate": f"{SLO_ERROR_RATE * 100:.1f}%",
         "slo.recovery_s": str(SLO_RECOVERY_SECONDS),
@@ -618,6 +621,10 @@ def build_values(runs: dict) -> dict:
         "table.failover": L.failover_table(runs),
         "table.soak": L.soak_tables(runs),
         "table.gatling": L.gatling_table(runs),
+        "table.gc": L.ladder_compare(runs, "tuned_steady", "tuned_steady_zgc", "G1", "ZGC"),
+        "table.ablation_f11": L.ladder_compare(runs, "tuned_steady", "tuned_steady_ablate-f11", "Tuned", "Tuned without F-11"),
+        "fact.jvm_opts_tuned": L.env_value(runs, "tuned_steady", "jvm_opts"),
+        "fact.webhook_latency": L.env_value(runs, "baseline_steady", "webhook_latency_ms", "unknown").split()[0],
         "table.profiles": L.profile_tables(runs),
         "fact.failover_note": failover_note(runs),
         "table.extended_scope": extended_scope_table(runs),

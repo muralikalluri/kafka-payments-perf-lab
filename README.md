@@ -42,7 +42,7 @@ The same offered rates against both profiles (end-to-end = payment accepted unti
 - The burst rate is below the highest step the tuned profile sustained in the steady runs, so the tuned system was never overloaded by the burst: this shows no degradation under the same load, not a faster recovery.
 - An earlier recording of the baseline spike scenario (commit `eecb939`), made before the baseline-affecting fixes, recovered within the window; the standard recording used in the tables above did not. A further recording, taken while the dashboard was being captured (`2026-09-30_baseline_spike_recorded`), also recovered. The recordings disagree, which shows run-to-run variance in this scenario for the baseline; no cause was attributed and no single recovery time is claimed.
 - The tuned profile has a higher median end-to-end latency than the baseline at low load (the smoke run and the lowest steady step). The likely causes are the outbox polling on the gateway and the ledger and producer lingering, but that was not verified. It is a real trade-off: a higher latency floor at low load in exchange for capacity at high load.
-- Only the combination of all 8 changes was measured; the effect of each change alone was not isolated, and no per-stage measurements (lag, CPU, garbage collection, lock waits) were captured. See the limits section of the [sample audit report](sample-deliverable/AUDIT_REPORT_SAMPLE.md).
+- Only the combination of all 13 changes was measured; the effect of each change alone was not isolated, and no per-stage measurements (lag, CPU, garbage collection, lock waits) were captured. See the limits section of the [sample audit report](sample-deliverable/AUDIT_REPORT_SAMPLE.md).
 - Correctness held in every run: no negative balances, debits equal credits, every payment reached a terminal state (729,781 payments across 10 runs).
 
 ## Architecture
@@ -155,6 +155,10 @@ The reasoning behind the main choices is recorded as architecture decision recor
 | [ADR-0005](docs/adr/0005-partition-sizing.md) | Partition count and record key (F-12) |
 | [ADR-0006](docs/adr/0006-account-cache.md) | Distributed account cache (F-13) |
 | [ADR-0007](docs/adr/0007-benchmark-method.md) | Benchmark method and result format |
+| [ADR-0008](docs/adr/0008-notification-handling.md) | Notification handling (F-05) |
+| [ADR-0009](docs/adr/0009-settlement-account.md) | Settlement account and its sharding (F-11) |
+| [ADR-0010](docs/adr/0010-kafka-cluster-and-failure-behaviour.md) | Three-broker cluster and behaviour when brokers stop |
+| [ADR-0011](docs/adr/0011-tracing-profiling-and-soak.md) | Tracing, profiling and soak tooling |
 
 ## Sample deliverables
 
