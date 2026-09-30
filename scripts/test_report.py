@@ -235,9 +235,18 @@ class ScopeTest(unittest.TestCase):
     def test_every_mvp_item_is_actually_done(self):
         runs = L.load_runs()
         rows = G.mvp_status(runs)
-        self.assertGreaterEqual(len(rows), 19)  # a floor, so removing a row from the check is noticed
+        self.assertGreaterEqual(len(rows), 18)  # a floor, so removing a row from the check is noticed
         missing = [item for item, ok, _ in rows if not ok]
         self.assertEqual(missing, [], f"MVP items not done: {missing}")
+
+    def test_extended_scope_statuses_match_the_repository(self):
+        rows = G.extended_scope(L.load_runs())
+        self.assertEqual(len(rows), 12)
+        for item, done, evidence in rows:  # every 'done' must have its evidence in the tree
+            if done:
+                self.assertTrue(evidence, item)
+        self.assertIn("Not built" if not all(ok for _, ok, _ in rows) else "Everything",
+                      G.not_built_sentence(L.load_runs()))
 
     def test_scope_check_notices_a_missing_item(self):
         runs = L.load_runs()

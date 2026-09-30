@@ -94,13 +94,15 @@ The findings covered: F-01 producer batching, F-03 consumer concurrency, F-04 ba
 
 ### Scope and known gaps
 
-Built to the MVP cut in [SPEC.md](SPEC.md). Each item below is checked against the repository (files, configuration and results) when this README is generated, so it cannot claim more than exists:
+Built to the MVP cut in [SPEC.md](SPEC.md) first, then the items SPEC marks Later. Each item below is checked against the repository (files, configuration and results) when this README is generated, so it cannot claim more than exists.
+
+**MVP scope**
 
 | MVP item | Status | Checked in |
 |---|---|---|
 | Gateway, validation and ledger services | done | services/ |
-| Notification service stubbed, not built | done | NotificationStub |
-| Single Kafka broker | done | docker-compose.yml |
+| Notification handled (stub or service) | done | NotificationStub or notification-service |
+| Kafka broker(s) defined in compose | done | docker-compose.yml |
 | Baseline anti-patterns kept behind default-off tuning flags | done | base *.yml flags |
 | F-01 tuned implementation | done | gateway and ledger tuned config; async publishers |
 | F-03 tuned implementation | done | consumer concurrency in *-tuned.yml |
@@ -116,11 +118,27 @@ Built to the MVP cut in [SPEC.md](SPEC.md). Each item below is checked against t
 | Results recorded for smoke, steady and spike, both profiles | done | results/ |
 | Quick audit and full audit report samples | done | sample-deliverable/ |
 | Tuned profile marked complete (gate in the runner) | done | payment-gateway-tuned.yml |
-| Nothing marked Later was built (no soak, Jaeger, notification service, report template folder) | done | absence checks |
 
-Not built, by design (marked Later in SPEC.md): F-02, F-05, F-09, F-10 and F-11, the notification service, a multi-broker cluster, the soak scenario and Gatling, tracing and flame graphs, PDF styling and a reusable report template folder.
+**Extended scope (marked Later in SPEC.md)**
 
-Known gaps in what was built: no load shedding on the gateway outbox backlog; no consumer-lag, CPU, garbage-collection or lock-wait snapshots stored with the results; FX rates are cached in process rather than in Redis; connection-pool sizes are unswept lab choices; the cache accepts bounded staleness (a blocked account can be approved until its cached copy is invalidated or expires).
+| Item marked Later in SPEC.md | Status | Checked in |
+|---|---|---|
+| F-02 producer idempotence, acks and in-flight | not built | *-baseline.yml, *-tuned.yml |
+| F-05 blocking notification call replaced by a hand-off (notification-service) | not built | services/notification-service |
+| F-09 serialization and INFO logging | not built | lab.tuning.f09 |
+| F-10 JVM sizing, GC choice and virtual threads | not built | lab.tuning.f10 |
+| F-11 hot settlement account | not built | lab.tuning.f11 |
+| Three-broker Kafka cluster | not built | docker-compose.yml |
+| Soak scenario | not built | load/k6/soak.js |
+| Gatling scenarios | not built | load/gatling/ |
+| Distributed tracing to Jaeger | not built | docker-compose.yml |
+| JFR recordings and flame graphs | not built | scripts/flamegraph.py |
+| PDF export of the reports | not built | scripts/export_pdf.js |
+| Reusable report template folder | not built | report/template/ |
+
+Not built (marked Later in SPEC.md): F-02 producer idempotence, acks and in-flight; F-05 blocking notification call replaced by a hand-off (notification-service); F-09 serialization and INFO logging; F-10 JVM sizing, GC choice and virtual threads; F-11 hot settlement account; Three-broker Kafka cluster; Soak scenario; Gatling scenarios; Distributed tracing to Jaeger; JFR recordings and flame graphs; PDF export of the reports; Reusable report template folder.
+
+Known gaps in what was built: no load shedding on the gateway outbox backlog; some results predate the per-stage metric snapshots (consumer lag, CPU, garbage collection, connection pools, locks), so those runs have none stored; FX rates are cached in process rather than in Redis; connection-pool sizes are unswept lab choices; the cache accepts bounded staleness (a blocked account can be approved until its cached copy is invalidated or expires).
 
 ## Design decisions
 

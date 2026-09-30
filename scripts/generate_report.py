@@ -403,10 +403,11 @@ def mvp_status(runs: dict) -> list:
 
     rows = [
         ("Gateway, validation and ledger services", all(exists("services", s, "pom.xml") for s in services), "services/"),
-        ("Notification service stubbed, not built",
+        ("Notification handled (stub or service)",
          exists("services", "payment-gateway", "src", "main", "java", "lab", "payments", "paymentgateway",
-                "NotificationStub.java") and not exists("services", "notification-service"), "NotificationStub"),
-        ("Single Kafka broker", compose.count("\n  kafka:") == 1 and "kafka-2" not in compose, "docker-compose.yml"),
+                "NotificationStub.java") or exists("services", "notification-service", "pom.xml"),
+         "NotificationStub or notification-service"),
+        ("Kafka broker(s) defined in compose", "\n  kafka" in compose, "docker-compose.yml"),
         ("Baseline anti-patterns kept behind default-off tuning flags", baseline_flags_off, "base *.yml flags"),
     ]
     rows += [(f"{fid} tuned implementation", ok, ev) for fid, ok, ev in findings]
@@ -424,11 +425,73 @@ def mvp_status(runs: dict) -> list:
          "sample-deliverable/"),
         ("Tuned profile marked complete (gate in the runner)", "complete: true" in tuned["payment-gateway"],
          "payment-gateway-tuned.yml"),
-        ("Nothing marked Later was built (no soak, Jaeger, notification service, report template folder)",
-         not exists("load", "k6", "soak.js") and "jaeger" not in compose.lower()
-         and not exists("services", "notification-service") and not exists("report", "template"), "absence checks"),
     ]
     return rows
+
+
+def extended_scope(runs: dict) -> list:
+    """(item, done, evidence) for the items SPEC marks Later, each checked against the repository. An item
+    turns 'done' only when its files and configuration exist; nothing here is asserted by hand."""
+    root = L.ROOT
+
+    def exists(*parts):
+        return os.path.exists(os.path.join(root, *parts))
+
+    def text(*parts):
+        p = os.path.join(root, *parts)
+        return open(p).read() if os.path.exists(p) else ""
+
+    def res(svc, kind):
+        return text("services", svc, "src", "main", "resources", f"{svc}-{kind}.yml")
+
+    compose = text("docker-compose.yml")
+    java = ("services", "{svc}", "src", "main", "java", "lab", "payments")
+    return [
+        ("F-02 producer idempotence, acks and in-flight", "enable.idempotence: false" in res("payment-gateway", "baseline")
+         and "enable.idempotence: true" in res("payment-gateway", "tuned"), "*-baseline.yml, *-tuned.yml"),
+        ("F-05 blocking notification call replaced by a hand-off (notification-service)",
+         exists("services", "notification-service", "pom.xml") and "f05: true" in res("payment-gateway", "tuned"),
+         "services/notification-service"),
+        ("F-09 serialization and INFO logging", "f09: true" in res("payment-gateway", "tuned"), "lab.tuning.f09"),
+        ("F-10 JVM sizing, GC choice and virtual threads", "f10: true" in res("payment-gateway", "tuned"), "lab.tuning.f10"),
+        ("F-11 hot settlement account", "f11: true" in res("ledger-service", "tuned"), "lab.tuning.f11"),
+        ("Three-broker Kafka cluster", "\n  kafka-3:" in compose, "docker-compose.yml"),
+        ("Soak scenario", exists("load", "k6", "soak.js"), "load/k6/soak.js"),
+        ("Gatling scenarios", exists("load", "gatling", "pom.xml"), "load/gatling/"),
+        ("Distributed tracing to Jaeger", "jaeger" in compose.lower(), "docker-compose.yml"),
+        ("JFR recordings and flame graphs", exists("scripts", "flamegraph.py"), "scripts/flamegraph.py"),
+        ("PDF export of the reports", exists("scripts", "export_pdf.js"), "scripts/export_pdf.js"),
+        ("Reusable report template folder", exists("report", "template", "REPORT_TEMPLATE.md"), "report/template/"),
+    ]
+
+
+def extended_scope_table(runs: dict) -> str:
+    rows = extended_scope(runs)
+    return L.table(["Item marked Later in SPEC.md", "Status", "Checked in"],
+                   [[i, "done" if ok else "not built", ev] for i, ok, ev in rows])
+
+
+def known_gaps_sentence(runs: dict) -> str:
+    """Known gaps, each included only while it is still true in the repository or the results."""
+    gaps = []
+    gateway = os.path.join(L.ROOT, "services", "payment-gateway", "src", "main", "java")
+    if not any("LoadShed" in f for _, _, files in os.walk(gateway) for f in files):
+        gaps.append("no load shedding on the gateway outbox backlog")
+    if any(not os.path.exists(os.path.join(r.dir, "metrics.json")) for r in runs.values()):
+        gaps.append("some results predate the per-stage metric snapshots (consumer lag, CPU, garbage collection, "
+                    "connection pools, locks), so those runs have none stored")
+    gaps.append("FX rates are cached in process rather than in Redis")
+    gaps.append("connection-pool sizes are unswept lab choices")
+    gaps.append("the cache accepts bounded staleness (a blocked account can be approved until its cached copy is "
+                "invalidated or expires)")
+    return "Known gaps in what was built: " + "; ".join(gaps) + "."
+
+
+def not_built_sentence(runs: dict) -> str:
+    missing = [i for i, ok, _ in extended_scope(runs) if not ok]
+    if not missing:
+        return "Everything marked Later in SPEC.md has been built."
+    return "Not built (marked Later in SPEC.md): " + "; ".join(missing) + "."
 
 
 def mvp_status_table(runs: dict) -> str:
@@ -522,6 +585,9 @@ def build_values(runs: dict) -> dict:
         "table.headline": headline_table(runs, b_pass, b_fail, t_pass, t_fail, fail_source),
         "table.adrs": L.adr_table(),
         "table.mvp_status": mvp_status_table(runs),
+        "table.extended_scope": extended_scope_table(runs),
+        "fact.not_built": not_built_sentence(runs),
+        "fact.known_gaps": known_gaps_sentence(runs),
         "fact.quadrants": quadrants_sentence(fs),
         "table.steady_baseline": L.steady_table(runs["baseline_steady"]),
         "table.steady_tuned": L.steady_table(runs["tuned_steady"]),
