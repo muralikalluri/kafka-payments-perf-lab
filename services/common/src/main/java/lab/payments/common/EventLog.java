@@ -21,6 +21,11 @@ public final class EventLog {
         verbose = value;
     }
 
+    /** True when {@link #event} would write anything, so callers can skip building its arguments. */
+    public static boolean isActive(Logger log) {
+        return verbose || log.isDebugEnabled();
+    }
+
     /** @param payload evaluated only when the full payload is going to be logged */
     public static void event(Logger log, String stage, String paymentId, Supplier<String> payload) {
         if (verbose) {

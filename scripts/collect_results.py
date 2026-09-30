@@ -165,7 +165,7 @@ def main():
 
     params = {}
     if a.scenario == "steady":
-        steps = [int(x) for x in os.environ.get("STEPS", "100,200,400,800").split(",")]
+        steps = [int(x) for x in os.environ.get("STEPS", "25,50,100,200,400,800").split(",")]
         secs = int(os.environ.get("STEP_SECONDS", "60"))
         params = {"steps_req_per_s": steps, "step_seconds": secs}
         phases = [(f"step_{r}", r, i * secs, secs) for i, r in enumerate(steps)]

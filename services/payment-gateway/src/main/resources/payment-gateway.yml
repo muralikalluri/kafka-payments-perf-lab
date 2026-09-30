@@ -11,6 +11,9 @@ lab:
     f01: false   # F-01: async producer sends with callbacks (baseline: synchronous send().get())
     f12: false   # F-12: record key = debtor account id (baseline: merchant id)
 spring:
+  threads:
+    virtual:
+      enabled: ${lab.tuning.f10:false}   # F-10: request threads are virtual only when tuned (baseline: platform threads)
   application:
     name: payment-gateway
   profiles:

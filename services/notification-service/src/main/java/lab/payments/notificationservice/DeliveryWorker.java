@@ -74,6 +74,11 @@ class DeliveryWorker {
         }
     }
 
+    @jakarta.annotation.PreDestroy
+    void shutdown() {
+        executor.shutdown();
+    }
+
     @Scheduled(fixedDelayString = "${lab.notification.poll-ms:50}")
     void tick() {
         int room = inFlight.availablePermits();
@@ -124,7 +129,7 @@ class DeliveryWorker {
         }
         if (ok) {
             jdbc.update("UPDATE notifications SET state = 'DELIVERED', attempts = attempts + 1, delivered_at = now() "
-                    + "WHERE payment_id = ?", row.paymentId());
+                    + "WHERE payment_id = ? AND state = 'PENDING'", row.paymentId());
             latency.record(Duration.between(row.postedAt(), Instant.now()));
             meters.counter("notifications.delivered").increment();
             return;
@@ -132,12 +137,12 @@ class DeliveryWorker {
         meters.counter("notifications.failed").increment();
         int attempts = row.attempts() + 1;
         if (attempts >= maxAttempts) {
-            jdbc.update("UPDATE notifications SET state = 'DEAD', attempts = ? WHERE payment_id = ?", attempts, row.paymentId());
+            jdbc.update("UPDATE notifications SET state = 'DEAD', attempts = ? WHERE payment_id = ? AND state = 'PENDING'", attempts, row.paymentId());
             meters.counter("notifications.dead_total").increment();
         } else {
             long backoff = backoffBaseMs * (1L << Math.min(attempts - 1, 10));
             jdbc.update("UPDATE notifications SET attempts = ?, next_attempt_at = now() + (? * interval '1 millisecond') "
-                    + "WHERE payment_id = ?", attempts, backoff, row.paymentId());
+                    + "WHERE payment_id = ? AND state = 'PENDING'", attempts, backoff, row.paymentId());
         }
     }
 }

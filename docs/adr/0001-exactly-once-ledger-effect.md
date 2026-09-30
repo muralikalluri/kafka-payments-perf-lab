@@ -28,3 +28,11 @@ also keeps working unchanged when the tuned profile moves to batch processing.
 - Insufficient funds is a business outcome (`REJECTED`), not an error, so it is never retried.
 - Poison messages go to `payments.validated.DLT` after bounded retries. A payment that dead-letters
   leaves a gap in its debtor's sequence (see ADR-0002); that is a known limitation of the MVP.
+
+## Addendum: a duplicate re-publishes the recorded outcome
+A duplicate used to publish nothing, on the reasoning that the first delivery had already queued the outcome. That is not
+enough: the first outcome can reach the gateway before the gateway has a row for the payment (a send from a gateway
+transaction that rolled back, then the client's retry, whose own event is a duplicate at the ledger). The gateway's update
+matches nothing, and the payment would stay ACCEPTED for good. So a payment seen again has its recorded outcome written to the
+outbox again, with the same event identifier. This is safe because the gateway's status update is idempotent and monotonic,
+and the ledger's effect is untouched. `LateRowTest` reproduces the case and fails without the re-publish.

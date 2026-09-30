@@ -20,7 +20,7 @@
 
 **Expected gain.** Only the combined effect was measured (the step ranges above). The gain from each change on its own was not isolated, so no per-fix gain is claimed.
 
-**What this report cannot tell you.** No per-stage measurements (consumer lag, CPU, garbage collection, lock waits) were captured, so no single component is named as the bottleneck.
+**What this report cannot tell you.** The combination of all 13 changes was measured. The effect of each change alone was not isolated. No per-stage measurements (consumer lag, CPU, garbage collection, lock waits) were captured for these runs, so no single component is named as the bottleneck.
 
 ## 2. Scope and method
 
@@ -134,7 +134,7 @@ Each finding lists the evidence available, the expected impact, a recommendation
 ### F-04 Ledger commits one record per transaction
 
 - **Evidence.** `LedgerService.handle` opens a transaction per record and issues each statement in its own round trip (locks, dedup check, postings, balances, outbox). The tuned `BatchLedgerProcessor` applies a whole poll in one transaction with JDBC batches (up to 250 records per poll here).
-- **Impact.** Assessed highest: it multiplies statements and commits per payment on the stage that writes the most rows and takes account locks. This is a judgement from the mechanism; per-stage timings were not captured.
+- **Impact.** Assessed highest: it multiplies statements and commits per payment on the stage that writes the most rows and takes account locks. This is a judgement from the mechanism; nothing isolates it from the rest.
 - **Recommendation.** Batch listener with one ordered lock set per batch, in-memory application against the locked snapshot, dedup inside and across batches, and per-record fallback for poison messages, never dead-lettering a whole batch.
 - **Effort / risk.** M / High. This is the most delicate change: it must keep idempotency, sequence ordering and the balance invariant. It is covered by dedicated tests (duplicates, reordering, opposite transfers, a poison record, a database outage).
 
@@ -333,6 +333,10 @@ quadrantChart
 | burst | 500 | 64.0 s | 106.8 s | 0 | 108 ms | 167 ms | 0 |
 | recover | 50 | 60.1 s | 106.8 s | 0 | 109 ms | 152 ms | 0 |
 
+**Stage observations** (peaks over the whole steady run, which includes the overloaded steps, so they show where pressure appeared, not what limited each step):
+
+_(no stage metrics are recorded for these runs)_
+
 **Smoke** (10 virtual users, correctness check):
 
 | Profile | Payments created | End-to-end p50 | p95 | p99 | HTTP error rate | p99 under SLO |
@@ -387,8 +391,8 @@ _(no broker-failure runs are recorded)_
 
 - One machine, most data points from a single run, load generator and services sharing the host. Differences at the level of a step are meaningful; small differences are not.
 - The limits are known only to step resolution, so any ratio is a range. The offered rate at which dropped iterations appear reflects latency backing up into the load generator; host contention may contribute and was not isolated.
-- Only the combination of all 13 changes was measured. The per-finding impact in section 7 is an informed assessment. An ablation (tuned with one change reverted) is the way to measure each one and is recommended before investing in the larger items.
-- No consumer lag, CPU, garbage-collection or lock-wait data was captured, so which stage limits either profile is not established. The dashboard exists (`grafana/dashboards`) but no snapshots were stored with the results.
+- The combination of all 13 changes was measured. The effect of each change alone was not isolated. The per-finding impact in section 7 is an informed assessment. An ablation (tuned with one change reverted) is the way to measure each change on its own and is recommended before investing in the larger items.
+- No consumer lag, CPU, garbage-collection or lock-wait data was captured for these runs, so which stage limits either profile is not established. The dashboard exists (`grafana/dashboards`) but no snapshots of it were stored with the results.
 - An earlier recording of the baseline spike scenario (commit `eecb939`), made before the baseline-affecting fixes, recovered within the window; the standard recording used in the tables above did not. A further recording, taken while the dashboard was being captured (`2026-09-30_baseline_spike_recorded`), also recovered. The recordings disagree, which shows run-to-run variance in this scenario for the baseline; no cause was attributed and no single recovery time is claimed.
 - The query plans were captured after the runs at different table sizes.
 - Replays of an earlier idempotency key create no payment, so payments created are about 90% of the requests sent in the steady and spike runs.

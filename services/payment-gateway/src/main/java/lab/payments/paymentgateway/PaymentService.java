@@ -79,7 +79,9 @@ public class PaymentService {
             throw new IllegalArgumentException("INVALID_IDEMPOTENCY_KEY");
         }
         // F-09: baseline logs the whole request at INFO; tuned logs the identifiers at DEBUG.
-        EventLog.event(log, "payment request from " + clientId, Ids.paymentId(clientId, idempotencyKey).toString(), () -> Json.write(req));
+        if (EventLog.isActive(log)) {
+            EventLog.event(log, "payment request from " + clientId, Ids.paymentId(clientId, idempotencyKey).toString(), () -> Json.write(req));
+        }
         if (outbox) {
             return acceptWithOutbox(clientId, idempotencyKey, req);
         }

@@ -177,6 +177,7 @@ fi
 set +e
 if [ "$SCENARIO" = gatling ]; then
   export GATLING_RATE="${GATLING_RATE:-50}" GATLING_SECONDS="${GATLING_SECONDS:-60}"
+  rm -rf load/gatling/target/gatling   # never pick up a previous run's report
   mvn -q -B -f load/gatling gatling:test -Drate="$GATLING_RATE" -Dseconds="$GATLING_SECONDS" \
     -DbaseUrl=http://localhost:8080 2>&1 | tee "$RUN_DIR/raw/gatling.log"
   K6_EXIT=${PIPESTATUS[0]}
@@ -196,6 +197,7 @@ for end in range(start, len(text)):
             break
 json.dump(json.loads(text[start:end + 1]), open(sys.argv[2], "w"), indent=1)
 PY
+  [ -f "$RUN_DIR/summary.json" ] || { echo "Gatling produced no statistics" >&2; exit 1; }
 else
   SUMMARY_PATH="$RUN_DIR/summary.json" k6 run --quiet "load/k6/$SCENARIO.js" 2>&1 | tee "$RUN_DIR/raw/k6.log"
   K6_EXIT=${PIPESTATUS[0]}

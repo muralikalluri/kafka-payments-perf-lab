@@ -10,7 +10,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.stereotype.Component;
-import org.springframework.util.backoff.ExponentialBackOff;
+import org.springframework.util.backoff.FixedBackOff;
 import java.sql.Timestamp;
 
 /**
@@ -44,12 +44,16 @@ class PostedEventConsumer {
     @ConditionalOnProperty(name = "lab.tuning.f05", havingValue = "true")
     static class ErrorHandling {
 
-        /** Retry a database blip for a while; after that the framework logs and skips the record. */
+        /**
+         * Retry database trouble for as long as it lasts (a record must not be skipped just because the database was
+         * briefly away: that would silently lose a notification). An unparseable record is not retryable and is logged
+         * and skipped.
+         */
         @Bean
         DefaultErrorHandler errorHandler() {
-            ExponentialBackOff backOff = new ExponentialBackOff(200, 2.0);
-            backOff.setMaxElapsedTime(30_000);
-            return new DefaultErrorHandler(backOff);
+            DefaultErrorHandler handler = new DefaultErrorHandler(new FixedBackOff(1_000L, FixedBackOff.UNLIMITED_ATTEMPTS));
+            handler.addNotRetryableExceptions(IllegalArgumentException.class);
+            return handler;
         }
     }
 }

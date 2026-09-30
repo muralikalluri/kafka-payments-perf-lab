@@ -1,9 +1,9 @@
 // Steady: stepped constant arrival rate. Finds the max sustainable throughput at the p99 SLO.
 // SPEC default is 200 -> 500 -> 1000 -> 2000 req/s, 5 min each; adjust to hardware via env:
-//   STEPS="100,200,400,800" STEP_SECONDS=60
+//   STEPS="25,50,100,200,400,800" STEP_SECONDS=60
 import { loadIteration, scenarioThresholds, trendStats, summarise, waitForGateway } from './lib.js';
 
-const steps = (__ENV.STEPS || '100,200,400,800').split(',').map(Number);
+const steps = (__ENV.STEPS || '25,50,100,200,400,800').split(',').map(Number);
 const stepSeconds = Number(__ENV.STEP_SECONDS || 60);
 
 const scenarios = {};

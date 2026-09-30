@@ -24,7 +24,8 @@ import org.springframework.transaction.annotation.Transactional;
  *
  * Invariants (ADR-0001, ADR-0002):
  *  - dedup: ledger_payments.payment_id is written in the same transaction as the postings;
- *  - both accounts are row-locked in id order, so balances never go negative and A->B / B->A
+ *  - the debtor, creditor and settlement accounts (and the creditors of parked payments) are row-locked in id
+ *    order, so balances never go negative and A->B / B->A
  *    cannot deadlock;
  *  - a payment is applied only when debtor_seq == account.last_seq + 1; early arrivals are parked
  *    in pending_payments and drained in order, so per-debtor order holds even though baseline
@@ -74,6 +75,7 @@ public class LedgerService {
             // Duplicate delivery: outcome already recorded and queued in the outbox. It may still
             // carry a fresh sequence number (client retry after a failed gateway commit), which
             // must be consumed or the debtor's later payments would park forever.
+            republishRecordedOutcome(e);
             sequenceForDuplicate(e, shardHint);
             return;
         }
@@ -196,6 +198,12 @@ public class LedgerService {
                 INSERT INTO ledger_payments(payment_id, debtor_account_id, debtor_seq, outcome, reason_code)
                 VALUES (?,?,?,?,?)""",
                 e.paymentId(), e.debtorAccountId(), e.debtorSeq(), outcome.name(), reason);
+        enqueuePosted(e, outcome, reason);
+        meters.counter("ledger.applied", "outcome", outcome.name()).increment();
+    }
+
+    /** Writes the outcome event to the outbox; the publisher sends it after the transaction commits. */
+    private void enqueuePosted(PaymentValidated e, PaymentPosted.Outcome outcome, String reason) {
         PaymentPosted posted = new PaymentPosted(PaymentPosted.SCHEMA_VERSION,
                 Ids.eventId(e.paymentId(), "posted"), e.eventId(), e.paymentId(), e.clientId(),
                 e.merchantId(), e.debtorAccountId(), outcome, reason, Instant.now());
@@ -203,7 +211,19 @@ public class LedgerService {
         jdbc.update("INSERT INTO outbox(msg_key, payload, trace) VALUES (?,?,?)",
                 keyByDebtor ? e.debtorAccountId() : e.merchantId(), Json.write(posted),
                 TraceCarrier.capture(tracer, propagator));
-        meters.counter("ledger.applied", "outcome", outcome.name()).increment();
+    }
+
+    /**
+     * A payment seen again is already recorded, but its outcome may not have reached the gateway's row: the first
+     * outcome can arrive before the row exists (a phantom event from a gateway send whose transaction rolled back, then
+     * the client's retry). The gateway's status update is idempotent and monotonic, so re-publishing the recorded
+     * outcome is safe, and without it that payment's status could stay ACCEPTED for good.
+     */
+    private void republishRecordedOutcome(PaymentValidated e) {
+        jdbc.query("SELECT outcome, reason_code FROM ledger_payments WHERE payment_id = ?", rs -> {
+            enqueuePosted(e, PaymentPosted.Outcome.valueOf(rs.getString(1)), rs.getString(2));
+            meters.counter("ledger.republished").increment();
+        }, e.paymentId());
     }
 
     private boolean exists(PaymentValidated e) {

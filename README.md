@@ -42,7 +42,7 @@ The same offered rates against both profiles (end-to-end = payment accepted unti
 - The burst rate is below the highest step the tuned profile sustained in the steady runs, so the tuned system was never overloaded by the burst: this shows no degradation under the same load, not a faster recovery.
 - An earlier recording of the baseline spike scenario (commit `eecb939`), made before the baseline-affecting fixes, recovered within the window; the standard recording used in the tables above did not. A further recording, taken while the dashboard was being captured (`2026-09-30_baseline_spike_recorded`), also recovered. The recordings disagree, which shows run-to-run variance in this scenario for the baseline; no cause was attributed and no single recovery time is claimed.
 - The tuned profile has a higher median end-to-end latency than the baseline at low load (the smoke run and the lowest steady step). The likely causes are the outbox polling on the gateway and the ledger and producer lingering, but that was not verified. It is a real trade-off: a higher latency floor at low load in exchange for capacity at high load.
-- Only the combination of all 13 changes was measured; the effect of each change alone was not isolated, and no per-stage measurements (lag, CPU, garbage collection, lock waits) were captured. See the limits section of the [sample audit report](sample-deliverable/AUDIT_REPORT_SAMPLE.md).
+- The combination of all 13 changes was measured. The effect of each change alone was not isolated. No per-stage measurements (consumer lag, CPU, garbage collection, lock waits) were captured for these runs, so no single component is named as the bottleneck. See the limits section of the [sample audit report](sample-deliverable/AUDIT_REPORT_SAMPLE.md).
 - Correctness held in every run: no negative balances, debits equal credits, every payment reached a terminal state (729,781 payments across 10 runs).
 
 ## Architecture
@@ -86,13 +86,13 @@ Results land in `results/<date>_<profile>_<scenario>/` (`result.json`, `summary.
 
 - 4 services (gateway, validation, ledger and a notification service with a webhook simulator), on a single Kafka broker with replication factor 1 in KRaft mode, Postgres with Flyway, and Redis for the tuned cache.
 - Profiles: `baseline` carries common real-world anti-patterns on purpose; `tuned` fixes each numbered finding behind its own flag, one commit per finding.
-- Load scenarios in k6 (smoke, steady stepped arrival rate, spike) and a runner that resets the stack, records the environment, checks the ledger invariants and derives every figure from the database and k6 output.
+- Load scenarios in k6 (smoke, soak, spike, steady) and the same workload in Gatling, and a runner that resets the stack, records the environment, checks the ledger invariants and derives every figure from the database and the load tool's output.
 - Micrometer metrics, Prometheus, Kafka and Postgres exporters and one provisioned Grafana dashboard, with per-stage metric snapshots stored beside each result.
 - Distributed tracing (OpenTelemetry to Jaeger) that follows one payment across the services, through the Kafka hops and the outbox publishers. Sampling is off during benchmarks; give the services a `TRACING_SAMPLING` fraction to see traces in the Jaeger UI at `localhost:16686`.
 - Query-plan evidence (`EXPLAIN (ANALYZE, BUFFERS)`) captured after every run.
 - A sample audit report and a single-service quick audit, generated from the results with a lint that rejects any hand-typed number; both export to PDF (`scripts/export_pdf.js`, pandoc and headless Chrome), and `report/template/` holds the fill-in version for real client work.
 
-The findings covered: F-01 producer batching, F-03 consumer concurrency, F-04 batch ledger writes, F-06 indexes, F-07 outbox and pool sizing, F-08 N+1 queries, F-12 record key and partitions, F-13 distributed account cache.
+The findings covered: F-01 (kafka producer), F-02 (kafka producer), F-03 (kafka consumer), F-04 (ledger writes), F-05 (consumer and integration), F-06 (database), F-07 (gateway and pools), F-08 (validation reads), F-09 (serialization and logging), F-10 (jvm), F-11 (ledger contention), F-12 (topic design), F-13 (caching).
 
 ### Scope and known gaps
 

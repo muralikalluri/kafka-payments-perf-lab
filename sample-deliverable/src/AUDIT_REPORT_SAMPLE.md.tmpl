@@ -20,7 +20,7 @@
 
 **Expected gain.** Only the combined effect was measured (the step ranges above). The gain from each change on its own was not isolated, so no per-fix gain is claimed.
 
-**What this report cannot tell you.** No per-stage measurements (consumer lag, CPU, garbage collection, lock waits) were captured, so no single component is named as the bottleneck.
+**What this report cannot tell you.** {{fact.isolation}} {{fact.stage_short}}
 
 ## 2. Scope and method
 
@@ -28,7 +28,7 @@
 
 {{table.limits}}
 
-**Objective.** End-to-end p99 (payment accepted until its terminal status is recorded at the gateway) under {{slo.p99_ms}} ms, HTTP error rate under {{slo.error_rate}}, no dropped load iterations, and recovery within {{slo.recovery_s}} s after a spike. The recovery check uses end-to-end latency as a stand-in for consumer lag; consumer lag itself was not recorded. The steady and spike payload mix is {{fact.mix_normal}} normal payments, {{fact.mix_duplicate}} replays of an earlier idempotency key and {{fact.mix_failing}} that fail validation, and {{fact.merchant_skew}} of the traffic belongs to one large merchant, which is what makes the record key matter (F-12). The smoke scenario ({{fact.smoke_vus}} virtual users) spreads traffic evenly instead.
+**Objective.** End-to-end p99 (payment accepted until its terminal status is recorded at the gateway) under {{slo.p99_ms}} ms, HTTP error rate under {{slo.error_rate}}, no dropped load iterations, and recovery within {{slo.recovery_s}} s after a spike. {{fact.stage_lag}} The steady and spike payload mix is {{fact.mix_normal}} normal payments, {{fact.mix_duplicate}} replays of an earlier idempotency key and {{fact.mix_failing}} that fail validation, and {{fact.merchant_skew}} of the traffic belongs to one large merchant, which is what makes the record key matter (F-12). The smoke scenario ({{fact.smoke_vus}} virtual users) spreads traffic evenly instead.
 
 **Scenarios.** The step lists and durations were adjusted to the hardware, as the specification allows, and are recorded with each result:
 
@@ -103,7 +103,7 @@ Each finding lists the evidence available, the expected impact, a recommendation
 ### F-04 Ledger commits one record per transaction
 
 - **Evidence.** `LedgerService.handle` opens a transaction per record and issues each statement in its own round trip (locks, dedup check, postings, balances, outbox). The tuned `BatchLedgerProcessor` applies a whole poll in one transaction with JDBC batches (up to {{cfg.tuned_max_poll_records}} records per poll here).
-- **Impact.** Assessed highest: it multiplies statements and commits per payment on the stage that writes the most rows and takes account locks. This is a judgement from the mechanism; per-stage timings were not captured.
+- **Impact.** Assessed highest: it multiplies statements and commits per payment on the stage that writes the most rows and takes account locks. This is a judgement from the mechanism; nothing isolates it from the rest.
 - **Recommendation.** Batch listener with one ordered lock set per batch, in-memory application against the locked snapshot, dedup inside and across batches, and per-record fallback for poison messages, never dead-lettering a whole batch.
 - **Effort / risk.** M / High. This is the most delicate change: it must keep idempotency, sequence ordering and the balance invariant. It is covered by dedicated tests (duplicates, reordering, opposite transfers, a poison record, a database outage).
 
@@ -223,6 +223,10 @@ Impact is assessed on a scale of {{fact.impact_scale}} and effort is S, M or L; 
 
 {{table.spike_comparison}}
 
+**Stage observations** (peaks over the whole steady run, which includes the overloaded steps, so they show where pressure appeared, not what limited each step):
+
+{{table.stage_evidence}}
+
 **Smoke** ({{fact.smoke_vus}} virtual users, correctness check):
 
 {{table.smoke}}
@@ -258,8 +262,8 @@ Impact is assessed on a scale of {{fact.impact_scale}} and effort is S, M or L; 
 
 - One machine, most data points from a single run, load generator and services sharing the host. Differences at the level of a step are meaningful; small differences are not.
 - The limits are known only to step resolution, so any ratio is a range. The offered rate at which dropped iterations appear reflects latency backing up into the load generator; host contention may contribute and was not isolated.
-- Only the combination of all {{fact.findings_count}} changes was measured. The per-finding impact in section 7 is an informed assessment. An ablation (tuned with one change reverted) is the way to measure each one and is recommended before investing in the larger items.
-- No consumer lag, CPU, garbage-collection or lock-wait data was captured, so which stage limits either profile is not established. The dashboard exists (`grafana/dashboards`) but no snapshots were stored with the results.
+- {{fact.isolation}} The per-finding impact in section 7 is an informed assessment. {{fact.ablation_recommendation}}
+- {{fact.stage_limits}} The dashboard exists (`grafana/dashboards`) but no snapshots of it were stored with the results.
 - {{fact.earlier_spike_note}}
 - The query plans were captured after the runs at different table sizes.
 - Replays of an earlier idempotency key create no payment, so payments created are about {{fact.payment_share}} of the requests sent in the steady and spike runs.

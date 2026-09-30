@@ -14,7 +14,7 @@ The review found 7 findings, ordered by expected value. Where a finding correspo
 
 ### Q-A (F-04) One transaction and many round trips per record
 
-- **Observation.** Each record opens a transaction, locks the debtor and creditor account rows, checks for a duplicate, reads the day's outflow, inserts the debit and credit postings, updates both balances and writes an outbox row, one statement at a time.
+- **Observation.** Each record opens a transaction, locks the debtor, creditor and settlement account rows, checks for a duplicate, reads the day's outflow, inserts the ledger legs (debtor to settlement to creditor), updates the balances and writes an outbox row, one statement at a time.
 - **Impact.** The number of commits and network round trips grows one-for-one with payments, and the account row locks are held across all of them. Expected to be the largest single cost in this service; not confirmed by a measurement.
 - **Recommendation.** Process a poll as one transaction with batched statements, lock the accounts of the whole batch in one ordered statement, and keep the dedup record in the same transaction. Isolate a poison record instead of failing the batch.
 - **Effort.** M. **Risk.** High: the dedup, sequence-ordering and lock-ordering rules must be preserved exactly.
@@ -26,9 +26,9 @@ The review found 7 findings, ordered by expected value. Where a finding correspo
 - **Recommendation.** Index postings by account and creation time. Alternatively keep a running per-account daily total, which trades a write for the read.
 - **Effort.** S. **Risk.** Low.
 
-### Q-C (F-03, F-12) Concurrency and partitions cap parallelism
+### Q-C (F-03, F-11, F-12) Concurrency, partitions and one settlement row cap parallelism
 
-- **Observation.** The service runs 1 consumer thread over 3 partitions, and records are keyed by merchant rather than by debtor account.
+- **Observation.** The service runs 1 consumer thread over 3 partitions, and records are keyed by merchant rather than by debtor account. Every payment also locks the same single settlement account, so once consumer threads are raised they queue on that one row.
 - **Impact.** Applies one payment at a time regardless of hardware, and a large merchant's records share one partition. Raising the thread count alone helps only once partitions and database connections allow it.
 - **Recommendation.** Key by debtor account, size partitions from measured per-partition throughput, then raise consumer threads to match. Per-debtor ordering is enforced by sequence numbers, so the key change does not put ordering at risk.
 - **Effort.** M. **Risk.** Medium: real parallelism exercises the locking (one latent lock-ordering bug was found while doing this).
@@ -54,11 +54,11 @@ The review found 7 findings, ordered by expected value. Where a finding correspo
 - **Recommendation.** Alert on the dead-letter topics, provide a re-drive procedure, and define how a sequence gap is closed. Retry transient database errors for as long as they last instead of dead-lettering them.
 - **Effort.** M. **Risk.** Medium.
 
-### Q-G Metrics count attempts, not outcomes
+### Q-G (F-09) Metrics count attempts, and logs carry full payloads
 
-- **Observation.** Applied and parked counters are incremented inside the transaction, so a retry or redelivery counts again.
-- **Impact.** Rates on a dashboard can overstate throughput after failures; a report built from them would be wrong.
-- **Recommendation.** Treat the counters as operational signals only; derive business figures from the database. Increment after commit if precise counts are needed.
+- **Observation.** Applied and parked counters are incremented inside the transaction, so a retry or redelivery counts again. Every event is also logged at info level with its full payload, and a new JSON mapper is built for each message.
+- **Impact.** Rates on a dashboard can overstate throughput after failures; a report built from them would be wrong. Full payloads put account identifiers and amounts into the logs, and the per-message mapper and log volume cost CPU on the hot path.
+- **Recommendation.** Treat the counters as operational signals only; derive business figures from the database, and increment after commit if precise counts are needed. Share one mapper and log identifiers at debug level, not payloads at info.
 - **Effort.** S. **Risk.** Low.
 
 ## Suggested order

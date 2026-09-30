@@ -113,6 +113,7 @@ class BatchLedgerProcessor {
         private final Map<String, Acct> accts = new HashMap<>();
         private Map<String, TreeMap<Long, PaymentValidated>> pending;
         private final Set<UUID> seen = new HashSet<>();
+        private final Map<UUID, String[]> preexisting = new HashMap<>();
         private final Map<String, Long> outflow = new HashMap<>();
         private final List<LedgerRow> ledgerRows = new ArrayList<>();
         private final List<PostingRow> postings = new ArrayList<>();
@@ -155,7 +156,8 @@ class BatchLedgerProcessor {
             Set<UUID> candidates = new HashSet<>();
             events.forEach(e -> candidates.add(e.paymentId()));
             pending.values().forEach(m -> m.values().forEach(p -> candidates.add(p.paymentId())));
-            seen.addAll(existingPayments(candidates));
+            preexisting.putAll(existingPayments(candidates));
+            seen.addAll(preexisting.keySet());
             loadOutflow(debtors);
 
             byDebtor.values().forEach(list -> list.forEach(this::handle));
@@ -165,6 +167,7 @@ class BatchLedgerProcessor {
         private void handle(PaymentValidated e) {
             Acct debtor = accts.get(e.debtorAccountId());
             if (seen.contains(e.paymentId())) {
+                republishRecordedOutcome(e);
                 duplicate(e, debtor);
                 return;
             }
@@ -221,6 +224,7 @@ class BatchLedgerProcessor {
                 }
                 pendingDeletes.add(new PendingRow(debtor.id, next.debtorSeq(), null));
                 if (seen.contains(next.paymentId())) {
+                    republishRecordedOutcome(next);
                     debtor.lastSeq = next.debtorSeq();
                     debtor.touched = true;
                 } else {
@@ -272,6 +276,12 @@ class BatchLedgerProcessor {
 
         private void record(PaymentValidated e, PaymentPosted.Outcome outcome, String reason) {
             ledgerRows.add(new LedgerRow(e.paymentId(), e.debtorAccountId(), e.debtorSeq(), outcome.name(), reason));
+            enqueuePosted(e, outcome, reason);
+            seen.add(e.paymentId());
+            meters.counter("ledger.applied", "outcome", outcome.name()).increment();
+        }
+
+        private void enqueuePosted(PaymentValidated e, PaymentPosted.Outcome outcome, String reason) {
             PaymentPosted posted = new PaymentPosted(PaymentPosted.SCHEMA_VERSION,
                     Ids.eventId(e.paymentId(), "posted"), e.eventId(), e.paymentId(), e.clientId(),
                     e.merchantId(), e.debtorAccountId(), outcome, reason, Instant.now());
@@ -284,8 +294,15 @@ class BatchLedgerProcessor {
                     ? TraceCarrier.within(tracer, propagator, parent, "ledger.apply", () -> TraceCarrier.capture(tracer, propagator))
                     : TraceCarrier.capture(tracer, propagator);
             outbox.add(new OutboxRow(keyByDebtor ? e.debtorAccountId() : e.merchantId(), Json.write(posted), trace));
-            seen.add(e.paymentId());
-            meters.counter("ledger.applied", "outcome", outcome.name()).increment();
+        }
+
+        /** See LedgerService: a payment seen again has its recorded outcome re-published (at most once per batch). */
+        private void republishRecordedOutcome(PaymentValidated e) {
+            String[] recorded = preexisting.remove(e.paymentId());
+            if (recorded != null) {
+                enqueuePosted(e, PaymentPosted.Outcome.valueOf(recorded[0]), recorded[1]);
+                meters.counter("ledger.republished").increment();
+            }
         }
 
         private void flush() {
@@ -359,14 +376,15 @@ class BatchLedgerProcessor {
             });
         }
 
-        private Set<UUID> existingPayments(Set<UUID> ids) {
-            Set<UUID> found = new HashSet<>();
+        /** Payments already recorded before this batch, with their stored outcome and reason. */
+        private Map<UUID, String[]> existingPayments(Set<UUID> ids) {
+            Map<UUID, String[]> found = new HashMap<>();
             jdbc.query(con -> {
-                var ps = con.prepareStatement("SELECT payment_id FROM ledger_payments WHERE payment_id = ANY(?)");
+                var ps = con.prepareStatement("SELECT payment_id, outcome, reason_code FROM ledger_payments WHERE payment_id = ANY(?)");
                 ps.setArray(1, con.createArrayOf("uuid", ids.toArray()));
                 return ps;
             }, rs -> {
-                found.add(rs.getObject(1, UUID.class));
+                found.put(rs.getObject(1, UUID.class), new String[] {rs.getString(2), rs.getString(3)});
             });
             return found;
         }

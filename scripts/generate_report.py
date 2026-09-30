@@ -46,6 +46,11 @@ def read_yml(service: str, kind: str) -> str:
         return fh.read()
 
 
+def read_base_yml(service: str) -> str:
+    with open(os.path.join(L.ROOT, "services", service, "src", "main", "resources", f"{service}.yml")) as fh:
+        return fh.read()
+
+
 def yml_int(text: str, key: str):
     m = re.search(rf"^\s*{re.escape(key)}:\s*(\d+)\s*(?:#.*)?$", text, re.M)
     return int(m.group(1)) if m else None
@@ -70,7 +75,7 @@ def cfg_facts(runs: dict) -> dict:
         "tuned_max_poll_records": yml_int(tuned["ledger-service"], "max-poll-records"),
         "baseline_in_flight": yml_int(read_yml("payment-gateway", "baseline"), "max.in.flight.requests.per.connection"),
         "tuned_in_flight": yml_int(tuned["payment-gateway"], "max.in.flight.requests.per.connection"),
-        "settlement_shards": yml_int(read_yml("ledger-service", "base") if False else open(os.path.join(L.ROOT, "services", "ledger-service", "src", "main", "resources", "ledger-service.yml")).read(), "shards"),
+        "settlement_shards": yml_int(read_base_yml("ledger-service"), "shards"),
         "cache_ttl_seconds": yml_int(tuned["validation-service"], "ttl-seconds"),
     }
 
@@ -502,6 +507,67 @@ def failover_note(runs: dict) -> str:
     return text
 
 
+def ablated_findings(runs: dict) -> list:
+    ids = []
+    for r in runs.values():
+        if r.suffix and r.suffix.startswith("ablate-"):
+            ids.append(r.suffix[len("ablate-"):].upper())
+    return sorted(set(ids))
+
+
+def isolation_sentence(runs: dict, n: int) -> str:
+    ablated = ablated_findings(runs)
+    text = f"The combination of all {n} changes was measured. "
+    if ablated:
+        text += (f"The effect of {', '.join(ablated)} alone was isolated with an ablation run (the tuned profile with that one "
+                 "change switched off); the effect of the other changes alone was not.")
+    else:
+        text += "The effect of each change alone was not isolated."
+    return text
+
+
+def ablation_recommendation(runs: dict) -> str:
+    ablated = ablated_findings(runs)
+    if ablated:
+        return (f"An ablation was run for {', '.join(ablated)}; the same method (the tuned profile with one change reverted) is "
+                "recommended for the others before investing in the larger items.")
+    return ("An ablation (tuned with one change reverted) is the way to measure each change on its own and is recommended "
+            "before investing in the larger items.")
+
+
+def stage_notes(runs: dict) -> dict:
+    if L.all_have_stage_metrics(runs):
+        return {
+            "short": ("Per-stage metrics (consumer lag, CPU, garbage collection, connection pools, locks) are stored with each run "
+                      "but cover the whole run rather than each load step, so this report does not attribute a limit to one "
+                      "component."),
+            "lag": ("The recovery check uses end-to-end latency as a stand-in for consumer lag; consumer lag over each run is "
+                    "stored in that run's `metrics.json`."),
+            "limits": ("Stage metrics (consumer lag, CPU, garbage collection, connection pools, database locks) are stored per run "
+                       "but span the whole run rather than each load step, so which stage limits either profile is not "
+                       "established from them alone; the stage observations in section 8 show where pressure appeared."),
+        }
+    return {
+        "short": ("No per-stage measurements (consumer lag, CPU, garbage collection, lock waits) were captured for these runs, so no "
+                  "single component is named as the bottleneck."),
+        "lag": "The recovery check uses end-to-end latency as a stand-in for consumer lag; consumer lag itself was not recorded.",
+        "limits": ("No consumer lag, CPU, garbage-collection or lock-wait data was captured for these runs, so which stage limits "
+                   "either profile is not established."),
+    }
+
+
+def findings_covered(fs: list) -> str:
+    return "The findings covered: " + ", ".join(f"{f['id']} ({f['area'].lower()})" for f in fs) + "."
+
+
+def load_scenarios() -> str:
+    k6 = sorted(f[:-3] for f in os.listdir(os.path.join(L.ROOT, "load", "k6")) if f.endswith(".js") and f != "lib.js")
+    text = "Load scenarios in k6 (" + ", ".join(k6) + ")"
+    if os.path.exists(os.path.join(L.ROOT, "load", "gatling", "pom.xml")):
+        text += " and the same workload in Gatling"
+    return text
+
+
 def known_gaps_sentence(runs: dict) -> str:
     """Known gaps, each included only while it is still true in the repository or the results."""
     gaps = []
@@ -621,6 +687,14 @@ def build_values(runs: dict) -> dict:
         "table.failover": L.failover_table(runs),
         "table.soak": L.soak_tables(runs),
         "table.gatling": L.gatling_table(runs),
+        "fact.isolation": isolation_sentence(runs, len(fs)),
+        "fact.ablation_recommendation": ablation_recommendation(runs),
+        "fact.stage_short": stage_notes(runs)["short"],
+        "fact.stage_lag": stage_notes(runs)["lag"],
+        "fact.stage_limits": stage_notes(runs)["limits"],
+        "fact.findings_covered": findings_covered(fs),
+        "fact.load_scenarios": load_scenarios(),
+        "table.stage_evidence": L.stage_evidence(runs),
         "table.gc": L.ladder_compare(runs, "tuned_steady", "tuned_steady_zgc", "G1", "ZGC"),
         "table.ablation_f11": L.ladder_compare(runs, "tuned_steady", "tuned_steady_ablate-f11", "Tuned", "Tuned without F-11"),
         "fact.jvm_opts_tuned": L.env_value(runs, "tuned_steady", "jvm_opts"),

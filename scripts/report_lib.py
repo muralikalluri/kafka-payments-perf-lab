@@ -521,6 +521,8 @@ def ladder_compare(runs: dict, key_a: str, key_b: str, label_a: str, label_b: st
     a, b = runs.get(key_a), runs.get(key_b)
     if not a or not b:
         return "_(the comparison run is not recorded)_"
+    if [p["target_req_per_s"] for p in a.phases] != [p["target_req_per_s"] for p in b.phases]:
+        return "_(the two runs offered different rates, so they are not compared side by side)_"
     rows = []
     for pa, pb in zip(a.phases, b.phases):
         rows.append([rate(pa["target_req_per_s"]),
@@ -533,3 +535,53 @@ def ladder_compare(runs: dict, key_a: str, key_b: str, label_a: str, label_b: st
 def env_value(runs: dict, key: str, field: str, default: str = "unknown") -> str:
     r = runs.get(key)
     return r.env.get(field, default) if r else default
+
+
+def _metric_max(run: Run, name: str, exclude=()):
+    """Highest value of a stored series over the run, across its labels."""
+    path = os.path.join(run.dir, "metrics.json")
+    if not os.path.exists(path):
+        return None
+    series = json.load(open(path)).get("series", {}).get(name, {})
+    values = [v["max"] for k, v in series.items() if isinstance(v, dict) and "max" in v and not k.startswith(exclude)]
+    return max(values) if values else None
+
+
+def _container_max(run: Run, name: str):
+    path = os.path.join(run.dir, "metrics.json")
+    if not os.path.exists(path):
+        return None
+    c = json.load(open(path)).get("containers", {}).get(name)
+    return c["cpu_percent_max"] if c else None
+
+
+def all_have_stage_metrics(runs: dict) -> bool:
+    standard = [runs.get(f"{p}_{s}") for p in ("baseline", "tuned") for s in ("smoke", "steady", "spike")]
+    return all(r is not None and os.path.exists(os.path.join(r.dir, "metrics.json")) for r in standard)
+
+
+def stage_evidence(runs: dict) -> str:
+    """Peaks over the whole steady run (all steps, including overloaded ones), baseline against tuned."""
+    b, t = runs.get("baseline_steady"), runs.get("tuned_steady")
+    if not b or not t or not all_have_stage_metrics(runs):
+        return "_(no stage metrics are recorded for these runs)_"
+
+    def cell(run, value, fmt):
+        return "n/a" if value is None else fmt(value)
+
+    rows = []
+    specs = [
+        ("Peak consumer lag (records, worst group)", lambda r: _metric_max(r, "consumer_lag", ("validation-cache-",)), lambda v: f"{v:,.0f}"),
+        ("Peak pending connection requests (worst service)", lambda r: _metric_max(r, "hikari_pending"), lambda v: f"{v:.0f}"),
+        ("Peak heap in use (worst service)", lambda r: _metric_max(r, "jvm_heap_used_bytes"), lambda v: f"{v / 2**20:.0f} MiB"),
+        ("Peak process CPU (worst service)", lambda r: _metric_max(r, "process_cpu_usage"), lambda v: f"{v * 100:.0f}%"),
+        ("Peak garbage-collection time (share of time, worst service)", lambda r: _metric_max(r, "gc_pause_seconds_per_second"), lambda v: f"{v * 100:.1f}%"),
+        ("Peak database locks held or awaited", lambda r: _metric_max(r, "pg_locks"), lambda v: f"{v:.0f}"),
+        ("Deadlocks per second (peak)", lambda r: _metric_max(r, "pg_deadlocks_per_second"), lambda v: f"{v:.2f}"),
+        ("Peak ledger outbox backlog (rows)", lambda r: _metric_max(r, "ledger_outbox_backlog"), lambda v: f"{v:,.0f}"),
+        ("Peak gateway outbox backlog (rows)", lambda r: _metric_max(r, "gateway_outbox_backlog"), lambda v: f"{v:,.0f}"),
+        ("Postgres container peak CPU", lambda r: _container_max(r, "postgres"), lambda v: f"{v:.0f}%"),
+    ]
+    for label, get, fmt in specs:
+        rows.append([label, cell(b, get(b), fmt), cell(t, get(t), fmt)])
+    return table(["Observation over the whole steady run", "Baseline", "Tuned"], rows)

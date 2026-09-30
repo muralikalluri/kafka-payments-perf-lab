@@ -56,12 +56,12 @@ final class Lab {
 
     static {
         POSTGRES.start();
+        if (TRACING) {
+            JAEGER.start(); // first: its image is large and a long pull after Kafka starts has broken the Kafka connection
+        }
         KAFKA.start();
         if ("tuned".equals(PROFILE)) {
             REDIS.start();
-        }
-        if (TRACING) {
-            JAEGER.start();
         }
         System.setProperty("LAB_PROFILE", PROFILE);
         // Fast retries so a failing webhook reaches its final state within a test.
