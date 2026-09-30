@@ -14,7 +14,7 @@ lab:
     # sets it because each one's KafkaAdmin creates or grows the shared topics.
     partitions: 12
   tuning:
-    # F-12: key by debtor account id. F-01 / F-07 flags select async publishing / the gateway outbox.
+    # F-12: key by debtor account id. F-08 and F-13 select the projection source / the Redis cache (F-13 needs F-08).
     f08: true
     f12: true
     f13: true
@@ -35,7 +35,9 @@ spring:
       compression-type: lz4
       batch-size: 65536
       properties:
-        linger.ms: 10
+        # Validation sends one record per listener call and must wait for the ack before the offset is
+        # committed, so lingering would only add latency here: F-01 is compression only in this service.
+        linger.ms: 0
   datasource:
     hikari:
       # F-07: pool sized for a 2-CPU Postgres shared by three services, not left at the default with

@@ -42,6 +42,10 @@ posting time).
 `lab.tuning.f13` is on, requires a shared token (placeholder in `.env.example`) and shares the service's
 port; it is not part of the payment API and not a model for production authentication.
 
+## Dependencies
+`lab.tuning.f13` requires `lab.tuning.f08` (the cache loads from the F-08 projection source); enabling F-13
+alone fails at startup.
+
 ## Transactions
 Baseline wraps a whole validation in one read-only transaction (JPA lazy loading needs it). Tuned uses
 plain JDBC and no wrapping transaction, otherwise a pooled connection would be held even on a cache hit.

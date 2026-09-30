@@ -44,3 +44,16 @@ Baseline leaves Hikari at its default (10 connections) with far more request and
 Tuned sets small pools for a 2-CPU Postgres shared by three services (gateway 6, validation 6, ledger
 8, with a connection timeout above the worst-case unit of work). These are lab choices that have not
 been swept; do not present them as optimal.
+
+## Producer batching per service (F-01)
+The gateway and ledger publish from outbox tables in batches, so they send asynchronously with a callback
+and delete only acknowledged rows; `linger.ms`, a larger `batch.size` and lz4 pay off there. Validation
+sends one record per listener call and must wait for the ack before the offset is committed, so it only
+gets compression: lingering would add latency to every message without batching anything (its consumer
+threads do not send concurrently enough to fill a batch). The F-01 commit message speaks of async sends;
+that holds for the two outbox publishers, not for validation.
+
+## Cost of the ledger lock-set fix in baseline
+The drain lock-order fix (commit 711e322) adds two small queries on `pending_payments` to every baseline
+record. It is a correctness fix that applies to both profiles, so it is part of the baseline cost the
+before/after comparison starts from.

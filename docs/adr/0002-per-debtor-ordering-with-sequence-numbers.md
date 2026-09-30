@@ -32,3 +32,10 @@ balances cannot go negative and opposite transfers cannot deadlock.
   a different payment that reused the phantom's number is rejected with `SEQUENCE_CONFLICT`, and a
   different payment carrying an already-parked number is not stored. The tuned profile's gateway
   outbox removes the phantom event altogether.
+
+## Batches and cross-debtor order
+The tuned ledger applies a batch debtor by debtor (in account-id order, each debtor in sequence order).
+There is no ordering guarantee across different debtors, in either profile: with A->B and B->C in the same
+batch, B's balance check can see the credit or not depending on processing order, and the outcome can
+differ from record-at-a-time processing. Per-debtor order, idempotency and the balance invariants hold in
+both.

@@ -23,9 +23,9 @@ spring:
       # F-03: consumer concurrency matched to the partition count (one thread per partition).
       concurrency: 12
     consumer:
-      max-poll-records: 250
+      max-poll-records: 250            # F-04: batch size per poll
       properties:
-        max.poll.interval.ms: 600000
+        max.poll.interval.ms: 600000   # F-04: a batch may retry a database outage for a long time
     producer:
       # F-01: batch and compress instead of linger.ms=0 / no compression / default batch size.
       compression-type: lz4

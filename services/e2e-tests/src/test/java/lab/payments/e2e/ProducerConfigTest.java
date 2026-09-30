@@ -21,7 +21,9 @@ class ProducerConfigTest {
             Map<String, Object> config = producerConfig(ctx);
             String service = ctx.getEnvironment().getProperty("spring.application.name");
             if (Lab.tuned()) {
-                assertThat(String.valueOf(config.get("linger.ms"))).as(service + " linger.ms").isEqualTo("10");
+                // Validation waits for each ack before committing the offset, so it does not linger (ADR-0004).
+                String expectedLinger = "validation-service".equals(service) ? "0" : "10";
+                assertThat(String.valueOf(config.get("linger.ms"))).as(service + " linger.ms").isEqualTo(expectedLinger);
                 assertThat(config.get("compression.type")).as(service + " compression").isEqualTo("lz4");
                 assertThat(String.valueOf(config.get("batch.size"))).as(service + " batch.size").isEqualTo("65536");
             } else {

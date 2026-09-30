@@ -11,6 +11,7 @@ import lab.payments.common.PaymentValidated;
 import lab.payments.common.PaymentValidated.Outcome;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
@@ -22,10 +23,11 @@ class ValidationService {
     private final TransactionTemplate tx;
     private final boolean wrapInTransaction;
 
-    ValidationService(ReferenceData reference, TransactionTemplate tx,
+    ValidationService(ReferenceData reference, PlatformTransactionManager transactionManager,
             @Value("${lab.tuning.f08:false}") boolean tuned) {
         this.reference = reference;
-        this.tx = tx;
+        this.tx = new TransactionTemplate(transactionManager);
+        this.tx.setReadOnly(true); // as the baseline's @Transactional(readOnly = true) was
         // Baseline: one read-only transaction around the whole validation (the JPA implementation needs it
         // for lazy loading). Tuned reference data uses plain JDBC and, with the Redis cache in front, most
         // validations touch no database at all, so holding a pooled connection for the whole call would
