@@ -1,0 +1,115 @@
+{
+  "schema_version": 1,
+  "profile": "tuned",
+  "scenario": "spike",
+  "git_sha": "06ce6f41a905a9fa1ca72e0249cd72eb90e64c79",
+  "git_dirty": false,
+  "params": {
+    "base_req_per_s": 50,
+    "burst_req_per_s": 500,
+    "warm_seconds": 30,
+    "burst_seconds": 60,
+    "recover_seconds": 120
+  },
+  "k6": {
+    "http_reqs": 37504,
+    "req_per_s": 178.58,
+    "http_req_failed_rate": 0,
+    "post_latency_ms": {
+      "p50": 1.27,
+      "p95": 3.75,
+      "p99": 9.36,
+      "max": 46.27
+    },
+    "dropped_iterations": 0,
+    "checks_pass_rate": 1
+  },
+  "k6_thresholds_passed": true,
+  "pipeline": {
+    "payments_created": 33808,
+    "terminal": 33808,
+    "posted": 29995,
+    "rejected": 3813,
+    "rejected_by_reason": {
+      "SANCTIONS_HIT": 3813
+    },
+    "e2e_ms": {
+      "count": 33808,
+      "p50": 107.9,
+      "p95": 152.37,
+      "p99": 166.27,
+      "max": 584.55
+    }
+  },
+  "phases": [
+    {
+      "phase": "warm",
+      "target_req_per_s": 50,
+      "achieved_req_per_s": 50.03,
+      "post_p99_ms": 11.85,
+      "http_req_failed_rate": 0,
+      "dropped_iterations": 0,
+      "e2e_ms": {
+        "count": 1375,
+        "p50": 112.15,
+        "p95": 151.92,
+        "p99": 335.08,
+        "max": 584.55
+      },
+      "meets_slo": true
+    },
+    {
+      "phase": "burst",
+      "target_req_per_s": 500,
+      "achieved_req_per_s": 500.02,
+      "post_p99_ms": 10.09,
+      "http_req_failed_rate": 0,
+      "dropped_iterations": 0,
+      "e2e_ms": {
+        "count": 27055,
+        "p50": 107.55,
+        "p95": 154.04,
+        "p99": 166.9,
+        "max": 206.16
+      },
+      "meets_slo": true
+    },
+    {
+      "phase": "recover",
+      "target_req_per_s": 50,
+      "achieved_req_per_s": 50.01,
+      "post_p99_ms": 5.74,
+      "http_req_failed_rate": 0,
+      "dropped_iterations": 0,
+      "e2e_ms": {
+        "count": 5378,
+        "p50": 108.74,
+        "p95": 143.26,
+        "p99": 151.81,
+        "max": 162.72
+      },
+      "meets_slo": true
+    }
+  ],
+  "invariants": {
+    "negative_balances": 0,
+    "debits_minus_credits_minor": 0,
+    "demo_total_balance_minor": 100000000000,
+    "pending_rows": 0,
+    "outbox_rows": 0,
+    "non_terminal_payments": 0,
+    "ledger_payments_minus_gateway_payments": 0,
+    "sequence_conflicts": 0,
+    "all_hold": true
+  },
+  "phases_unattributed_payments": 0,
+  "spike": {
+    "recovery_seconds_after_burst": 0.0,
+    "recovered_within_run": true,
+    "recovery_definition": "seconds after the burst ends until payments created afterwards complete under the 500 ms SLO again (last slow payment's creation time)"
+  },
+  "slo": {
+    "error_rate_under_0_1pct": true,
+    "lag_recovers_within_2min": true
+  }
+}

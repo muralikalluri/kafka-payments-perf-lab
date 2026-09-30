@@ -1,0 +1,28 @@
+rows: gateway.payments=1660 ledger.postings=2960
+indexes on gateway.payments:
+  payments_client_key_uq
+  payments_pkey
+indexes on ledger.postings:
+  postings_account_created_idx
+  postings_pkey
+
+== F-06 idempotency lookup (gateway PaymentService.find)
+Index Scan using payments_client_key_uq on payments  (cost=0.28..8.30 rows=1 width=106) (actual time=0.013..0.014 rows=1 loops=1)
+  Index Cond: ((client_id = 'client-demo'::text) AND (idempotency_key = 'smoke-6-182-1790757556571'::text))
+  Buffers: shared hit=3
+Planning:
+  Buffers: shared hit=126
+Planning Time: 0.215 ms
+Execution Time: 0.027 ms
+
+== F-06 daily outflow (ledger LedgerService.outflowToday) for the busiest debtor ACC-0639
+Aggregate  (cost=8.31..8.32 rows=1 width=32) (actual time=0.027..0.027 rows=1 loops=1)
+  Buffers: shared hit=7
+  ->  Index Scan using postings_account_created_idx on postings  (cost=0.28..8.31 rows=1 width=8) (actual time=0.013..0.024 rows=7 loops=1)
+        Index Cond: ((account_id = 'ACC-0639'::text) AND (created_at >= date_trunc('day'::text, now())))
+        Filter: (direction = 'D'::bpchar)
+        Buffers: shared hit=7
+Planning:
+  Buffers: shared hit=121
+Planning Time: 0.177 ms
+Execution Time: 0.048 ms
