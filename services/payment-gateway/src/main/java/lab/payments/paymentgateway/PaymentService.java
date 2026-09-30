@@ -11,10 +11,13 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import lab.payments.common.EventLog;
 import lab.payments.common.Ids;
 import lab.payments.common.Json;
 import lab.payments.common.PaymentInitiated;
 import lab.payments.common.Topics;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -24,6 +27,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class PaymentService {
+
+    private static final Logger log = LoggerFactory.getLogger(PaymentService.class);
 
     static final String ACCEPTED = "ACCEPTED";
 
@@ -64,6 +69,8 @@ public class PaymentService {
         if (idempotencyKey.isBlank() || idempotencyKey.length() > 128) {
             throw new IllegalArgumentException("INVALID_IDEMPOTENCY_KEY");
         }
+        // F-09: baseline logs the whole request at INFO; tuned logs the identifiers at DEBUG.
+        EventLog.event(log, "payment request from " + clientId, Ids.paymentId(clientId, idempotencyKey).toString(), () -> Json.write(req));
         if (outbox) {
             return acceptWithOutbox(clientId, idempotencyKey, req);
         }

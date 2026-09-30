@@ -5,9 +5,12 @@ import io.micrometer.core.instrument.Timer;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import lab.payments.common.EventLog;
 import lab.payments.common.Json;
 import lab.payments.common.PaymentPosted;
 import lab.payments.common.Topics;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
@@ -16,6 +19,7 @@ import org.springframework.stereotype.Component;
 @Component
 class PostedListener {
 
+    private static final Logger log = LoggerFactory.getLogger(PostedListener.class);
     private static final int TERMINAL_RANK = 3;
 
     private final JdbcTemplate jdbc;
@@ -40,6 +44,7 @@ class PostedListener {
     @KafkaListener(topics = Topics.POSTED)
     void onPosted(String payload) {
         PaymentPosted event = Json.read(payload, PaymentPosted.class);
+        EventLog.event(log, "payment posted", event.paymentId().toString(), () -> payload); // F-09
         List<Instant> created = jdbc.query("""
                 UPDATE payments SET status = ?, status_rank = ?, reason_code = ?, updated_at = now()
                 WHERE payment_id = ? AND status_rank < ?

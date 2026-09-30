@@ -9,6 +9,7 @@ lab:
     # sets it because each one's KafkaAdmin creates or grows the shared topics.
     partitions: 12
   tuning:
+    f09: true
     complete: true   # every MVP finding (F-01, F-03, F-04, F-06, F-07, F-08, F-12, F-13) is implemented; run-benchmark.sh checks this
     # F-12: key by debtor account id. F-01 / F-07 flags select async publishing / the gateway outbox.
     f01: true

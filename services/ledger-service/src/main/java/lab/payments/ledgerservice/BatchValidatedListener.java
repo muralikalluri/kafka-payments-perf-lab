@@ -3,6 +3,7 @@ package lab.payments.ledgerservice;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import lab.payments.common.EventLog;
 import lab.payments.common.Json;
 import lab.payments.common.PaymentValidated;
 import lab.payments.common.Topics;
@@ -51,7 +52,9 @@ class BatchValidatedListener {
         List<Parsed> parsed = new ArrayList<>();
         for (ConsumerRecord<String, String> record : records) {
             try {
-                parsed.add(new Parsed(record, Json.read(record.value(), PaymentValidated.class)));
+                PaymentValidated event = Json.read(record.value(), PaymentValidated.class);
+                EventLog.event(log, "payment validated", event.paymentId().toString(), record::value); // F-09
+                parsed.add(new Parsed(record, event));
             } catch (RuntimeException e) {
                 deadLetter(record, "unparseable: " + e.getMessage());
             }

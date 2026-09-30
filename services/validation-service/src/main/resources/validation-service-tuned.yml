@@ -14,6 +14,7 @@ lab:
     # sets it because each one's KafkaAdmin creates or grows the shared topics.
     partitions: 12
   tuning:
+    f09: true
     # F-12: key by debtor account id. F-08 and F-13 select the projection source / the Redis cache (F-13 needs F-08).
     f08: true
     f12: true
