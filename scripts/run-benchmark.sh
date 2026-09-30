@@ -5,6 +5,7 @@
 # RECOVER_SECONDS (spike); SOAK_RATE, SOAK_MINUTES (soak; the rate defaults to 60% of the profile's steady maximum,
 # read from its latest steady result). They are recorded in result.json. RUN_SUFFIX appends to the results folder name.
 # BENCH_CHAOS_CMD is an optional shell command run in the background during the load (fault injection).
+# BENCH_JFR=true records each service with Java Flight Recorder and writes flame graphs into the result folder.
 # BENCH_SERVICE_ENV is an optional space-separated list of NAME=value settings for the services, used for ablation runs,
 # for example BENCH_SERVICE_ENV=LAB_TUNING_F11=false switches one tuned finding off (Spring maps it to lab.tuning.f11).
 set -euo pipefail
@@ -93,6 +94,12 @@ else
   JVM_OPTS=""
 fi
 
+# Optional profiling: BENCH_JFR=true starts every service with a Java Flight Recorder recording, dumped at the end of the
+# load and turned into flame graphs (scripts/flamegraph.py). Raw .jfr files stay in raw/ (not committed).
+if [ "${BENCH_JFR:-}" = true ]; then
+  JVM_OPTS="$JVM_OPTS -XX:StartFlightRecording=name=lab,settings=profile,maxsize=300m -XX:FlightRecorderOptions=stackdepth=256"
+fi
+
 echo "==> start services (profile: $PROFILE)"
 for s in $SERVICES; do
   env ${BENCH_SERVICE_ENV:-} LAB_TOPIC_REPLICAS="${LAB_TOPIC_REPLICAS:-3}" \
@@ -100,6 +107,7 @@ for s in $SERVICES; do
     LAB_PROFILE="$PROFILE" nohup java $JVM_OPTS -jar "services/$s/target/$s-0.1.0-SNAPSHOT-exec.jar" \
     > "$RUN_DIR/raw/$s.log" 2>&1 &
   PIDS="$PIDS $!"
+  echo "$!" > "$RUN_DIR/raw/$s.pid"
 done
 for i in $(seq 1 90); do
   ok=1
@@ -126,6 +134,7 @@ echo "==> environment"
     echo "cpu_cores=$(nproc)"
     echo "ram_bytes=$(awk '/MemTotal/ {print $2*1024}' /proc/meminfo)"
   fi
+  echo "jfr=${BENCH_JFR:-false}"
   echo "jvm_opts=${JVM_OPTS:-defaults}"
   [ "$SCENARIO" = soak ] && echo "soak_rate=$SOAK_RATE soak_minutes=$SOAK_MINUTES"
   echo "ablation=${BENCH_SERVICE_ENV:-none}"
@@ -184,6 +193,16 @@ kill "$STATS_PID" 2>/dev/null || true
 echo "==> stage metrics snapshot"
 python3 scripts/capture_metrics.py --run-dir "$RUN_DIR" --start "$METRICS_START" --end "$METRICS_END" \
   || echo "WARNING: could not capture the metric snapshot" >&2
+
+if [ "${BENCH_JFR:-}" = true ]; then
+  echo "==> flame graphs (JFR)"
+  JCMD="${JAVA_HOME:+$JAVA_HOME/bin/}jcmd"
+  for s in $SERVICES; do
+    "$JCMD" "$(cat "$RUN_DIR/raw/$s.pid")" JFR.dump name=lab filename="$ROOT/$RUN_DIR/raw/$s.jfr" >/dev/null \
+      || echo "WARNING: could not dump the recording of $s" >&2
+  done
+  python3 scripts/flamegraph.py --run-dir "$RUN_DIR" || echo "WARNING: flame graph generation failed" >&2
+fi
 
 echo "==> explain plans (F-06 evidence)"
 ./scripts/explain-analyze.sh "$RUN_DIR"

@@ -1,6 +1,10 @@
 package lab.payments.ledgerservice;
 
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.tracing.Tracer;
+import io.micrometer.tracing.propagation.Propagator;
+import lab.payments.common.TraceCarrier;
+import org.springframework.beans.factory.ObjectProvider;
 import java.sql.Array;
 import java.time.Instant;
 import java.util.List;
@@ -36,9 +40,14 @@ public class LedgerService {
     private final MeterRegistry meters;
     private final boolean keyByDebtor;
     private final SettlementAccounts settlement;
+    private final Tracer tracer;
+    private final Propagator propagator;
 
     public LedgerService(JdbcTemplate jdbc, MeterRegistry meters,
-            @Value("${lab.tuning.f12:false}") boolean keyByDebtor, SettlementAccounts settlement) {
+            @Value("${lab.tuning.f12:false}") boolean keyByDebtor, SettlementAccounts settlement,
+            ObjectProvider<Tracer> tracer, ObjectProvider<Propagator> propagator) {
+        this.tracer = tracer.getIfAvailable();
+        this.propagator = propagator.getIfAvailable();
         this.keyByDebtor = keyByDebtor;
         this.settlement = settlement;
         this.jdbc = jdbc;
@@ -191,8 +200,9 @@ public class LedgerService {
                 Ids.eventId(e.paymentId(), "posted"), e.eventId(), e.paymentId(), e.clientId(),
                 e.merchantId(), e.debtorAccountId(), outcome, reason, Instant.now());
         // F-12: keyed by merchant id in baseline, by debtor account id in tuned.
-        jdbc.update("INSERT INTO outbox(msg_key, payload) VALUES (?,?)",
-                keyByDebtor ? e.debtorAccountId() : e.merchantId(), Json.write(posted));
+        jdbc.update("INSERT INTO outbox(msg_key, payload, trace) VALUES (?,?,?)",
+                keyByDebtor ? e.debtorAccountId() : e.merchantId(), Json.write(posted),
+                TraceCarrier.capture(tracer, propagator));
         meters.counter("ledger.applied", "outcome", outcome.name()).increment();
     }
 

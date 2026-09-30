@@ -26,6 +26,10 @@ spring:
     schemas: validation
     default-schema: validation
   kafka:
+    template:
+      observation-enabled: true
+    listener:
+      observation-enabled: true
     bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
     producer:
       acks: all
@@ -43,6 +47,12 @@ spring:
 server:
   port: ${SERVER_PORT:8081}
 management:
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLING:0.0}   # off unless asked: benchmarks run untraced; tests and demos set 1.0
+  otlp:
+    tracing:
+      endpoint: ${OTLP_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
   endpoints:
     web:
       exposure:

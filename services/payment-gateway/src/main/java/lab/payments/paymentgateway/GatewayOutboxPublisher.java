@@ -1,5 +1,9 @@
 package lab.payments.paymentgateway;
 
+import io.micrometer.tracing.Tracer;
+import io.micrometer.tracing.propagation.Propagator;
+import lab.payments.common.TraceCarrier;
+import org.springframework.beans.factory.ObjectProvider;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -25,15 +29,20 @@ import org.springframework.stereotype.Component;
 @ConditionalOnProperty(name = "lab.tuning.f07", havingValue = "true")
 class GatewayOutboxPublisher {
 
-    private record Row(long id, String key, String payload) {
+    private record Row(long id, String key, String payload, String trace) {
     }
 
     private final JdbcTemplate jdbc;
     private final KafkaTemplate<String, String> kafka;
     private final boolean asyncSend;
+    private final Tracer tracer;
+    private final Propagator propagator;
 
     GatewayOutboxPublisher(JdbcTemplate jdbc, KafkaTemplate<String, String> kafka, MeterRegistry meters,
-            @Value("${lab.tuning.f01:false}") boolean asyncSend) {
+            @Value("${lab.tuning.f01:false}") boolean asyncSend,
+            ObjectProvider<Tracer> tracer, ObjectProvider<Propagator> propagator) {
+        this.tracer = tracer.getIfAvailable();
+        this.propagator = propagator.getIfAvailable();
         this.jdbc = jdbc;
         this.kafka = kafka;
         this.asyncSend = asyncSend;
@@ -49,15 +58,15 @@ class GatewayOutboxPublisher {
 
     @Scheduled(fixedDelayString = "${lab.outbox.poll-ms:50}")
     synchronized void flush() {
-        List<Row> rows = jdbc.query("SELECT id, msg_key, payload FROM outbox ORDER BY id LIMIT 500",
-                (rs, i) -> new Row(rs.getLong(1), rs.getString(2), rs.getString(3)));
+        List<Row> rows = jdbc.query("SELECT id, msg_key, payload, trace FROM outbox ORDER BY id LIMIT 500",
+                (rs, i) -> new Row(rs.getLong(1), rs.getString(2), rs.getString(3), rs.getString(4)));
         List<Long> sent = new ArrayList<>();
         try {
             if (asyncSend) {
                 sendAsync(rows, sent);
             } else {
                 for (Row row : rows) {
-                    kafka.send(Topics.INITIATED, row.key(), row.payload()).get(10, TimeUnit.SECONDS);
+                    send(row).get(10, TimeUnit.SECONDS);
                     sent.add(row.id());
                 }
             }
@@ -79,7 +88,7 @@ class GatewayOutboxPublisher {
         ConcurrentLinkedQueue<Long> acked = new ConcurrentLinkedQueue<>();
         List<CompletableFuture<?>> pending = new ArrayList<>();
         for (Row row : rows) {
-            pending.add(kafka.send(Topics.INITIATED, row.key(), row.payload()).whenComplete((result, error) -> {
+            pending.add(send(row).whenComplete((result, error) -> {
                 if (error == null) {
                     acked.add(row.id());
                 }
@@ -90,6 +99,12 @@ class GatewayOutboxPublisher {
         } finally {
             sent.addAll(acked);
         }
+    }
+
+    /** The send runs inside a span whose parent is the trace of the request that wrote the row. */
+    private CompletableFuture<org.springframework.kafka.support.SendResult<String, String>> send(Row row) {
+        return TraceCarrier.within(tracer, propagator, row.trace(), "gateway.outbox.publish",
+                () -> kafka.send(Topics.INITIATED, row.key(), row.payload()));
     }
 
     private void deleteSent(List<Long> ids) {

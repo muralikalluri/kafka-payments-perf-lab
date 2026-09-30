@@ -107,6 +107,15 @@ services:
       postgres:
         condition: service_healthy
 
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    ports:
+      - "16686:16686"   # UI and query API
+      - "4318:4318"     # OTLP over HTTP (what the services export to)
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+      MEMORY_MAX_TRACES: "20000"
+
   prometheus:
     image: prom/prometheus:v2.55.1
     ports:

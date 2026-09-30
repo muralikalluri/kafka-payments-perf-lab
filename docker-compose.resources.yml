@@ -28,3 +28,6 @@ services:
   postgres-exporter:
     cpus: 0.25
     mem_limit: 128m
+  jaeger:
+    cpus: 0.5
+    mem_limit: 512m

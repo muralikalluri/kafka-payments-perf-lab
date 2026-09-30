@@ -302,6 +302,13 @@ def queueing_note(runs: dict) -> str:
     return "Baseline steps are not independent, because its cost grows as the tables fill during a run."
 
 
+def jaeger_port() -> str:
+    """Host port of the Jaeger UI, read from the compose file."""
+    with open(os.path.join(L.ROOT, "docker-compose.yml")) as fh:
+        m = re.search(r'"(\d+):16686"', fh.read())
+    return m.group(1) if m else "unknown"
+
+
 def java_version() -> str:
     with open(os.path.join(L.ROOT, "pom.xml")) as fh:
         return re.search(r"<java.version>(\d+)</java.version>", fh.read()).group(1)
@@ -597,6 +604,7 @@ def build_values(runs: dict) -> dict:
         "fact.run_count": str(len(runs)),
         "fact.payments_total": f"{sum(r.result['pipeline']['payments_created'] for r in runs.values()):,}",
         "fact.java_version": java_version(),
+        "fact.jaeger_port": jaeger_port(),
         "fact.gif_path": GIF_PATH,
         "fact.gif_caption": gif_caption(runs),
         "table.headline": headline_table(runs, b_pass, b_fail, t_pass, t_fail, fail_source),
@@ -605,6 +613,7 @@ def build_values(runs: dict) -> dict:
         "fact.kafka_topology": L.kafka_topology(runs),
         "table.failover": L.failover_table(runs),
         "table.soak": L.soak_tables(runs),
+        "table.profiles": L.profile_tables(runs),
         "fact.failover_note": failover_note(runs),
         "table.extended_scope": extended_scope_table(runs),
         "fact.not_built": not_built_sentence(runs),

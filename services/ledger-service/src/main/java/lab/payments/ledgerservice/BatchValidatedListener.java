@@ -1,7 +1,10 @@
 package lab.payments.ledgerservice;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import lab.payments.common.EventLog;
 import lab.payments.common.Json;
@@ -63,7 +66,7 @@ class BatchValidatedListener {
             return;
         }
         try {
-            processWithRetry(parsed.stream().map(Parsed::event).toList(), parsed.get(0).record().partition());
+            processWithRetry(parsed.stream().map(Parsed::event).toList(), parsed.get(0).record().partition(), traceparents(parsed));
         } catch (InterruptedException e) {
             throw e;
         } catch (RuntimeException batchFailure) {
@@ -71,7 +74,7 @@ class BatchValidatedListener {
                     parsed.size(), batchFailure.toString());
             for (Parsed p : parsed) {
                 try {
-                    processWithRetry(List.of(p.event()), p.record().partition());
+                    processWithRetry(List.of(p.event()), p.record().partition(), traceparents(List.of(p)));
                 } catch (RuntimeException recordFailure) {
                     deadLetter(p.record(), "failed: " + recordFailure);
                 }
@@ -79,11 +82,24 @@ class BatchValidatedListener {
         }
     }
 
-    private void processWithRetry(List<PaymentValidated> events, int shardHint) throws InterruptedException {
+    /** Each record's own W3C traceparent header, by payment, so the outcome continues that payment's trace. */
+    private static Map<UUID, String> traceparents(List<Parsed> parsed) {
+        Map<UUID, String> result = new HashMap<>();
+        for (Parsed p : parsed) {
+            var header = p.record().headers().lastHeader("traceparent");
+            if (header != null) {
+                result.put(p.event().paymentId(), new String(header.value(), java.nio.charset.StandardCharsets.UTF_8));
+            }
+        }
+        return result;
+    }
+
+    private void processWithRetry(List<PaymentValidated> events, int shardHint, Map<UUID, String> traceparents)
+            throws InterruptedException {
         long delayMs = 200;
         while (true) {
             try {
-                processor.process(events, shardHint);
+                processor.process(events, shardHint, traceparents);
                 return;
             } catch (RuntimeException e) {
                 if (!isTransient(e)) {

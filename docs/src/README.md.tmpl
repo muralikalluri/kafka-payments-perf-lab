@@ -75,7 +75,8 @@ Results land in `results/<date>_<profile>_<scenario>/` (`result.json`, `summary.
 - {{fact.service_count}} services (gateway, validation, ledger and a notification service with a webhook simulator), on {{fact.kafka_topology}} in KRaft mode, Postgres with Flyway, and Redis for the tuned cache.
 - Profiles: `baseline` carries common real-world anti-patterns on purpose; `tuned` fixes each numbered finding behind its own flag, one commit per finding.
 - Load scenarios in k6 (smoke, steady stepped arrival rate, spike) and a runner that resets the stack, records the environment, checks the ledger invariants and derives every figure from the database and k6 output.
-- Micrometer metrics, Prometheus, Kafka and Postgres exporters and one provisioned Grafana dashboard.
+- Micrometer metrics, Prometheus, Kafka and Postgres exporters and one provisioned Grafana dashboard, with per-stage metric snapshots stored beside each result.
+- Distributed tracing (OpenTelemetry to Jaeger) that follows one payment across the services, through the Kafka hops and the outbox publishers. Sampling is off during benchmarks; give the services a `TRACING_SAMPLING` fraction to see traces in the Jaeger UI at `localhost:{{fact.jaeger_port}}`.
 - Query-plan evidence (`EXPLAIN (ANALYZE, BUFFERS)`) captured after every run.
 - A sample audit report and a single-service quick audit, generated from the results with a lint that rejects any hand-typed number.
 

@@ -1,6 +1,10 @@
 package lab.payments.ledgerservice;
 
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.tracing.Tracer;
+import io.micrometer.tracing.propagation.Propagator;
+import lab.payments.common.TraceCarrier;
+import org.springframework.beans.factory.ObjectProvider;
 import java.sql.Array;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -69,7 +73,7 @@ class BatchLedgerProcessor {
     private record PostingRow(UUID paymentId, String account, String direction, long amount) {
     }
 
-    private record OutboxRow(String key, String payload) {
+    private record OutboxRow(String key, String payload, String trace) {
     }
 
     private record PendingRow(String debtor, long seq, String payload) {
@@ -80,10 +84,15 @@ class BatchLedgerProcessor {
     private final TransactionTemplate tx;
     private final boolean keyByDebtor;
     private final SettlementAccounts settlement;
+    private final Tracer tracer;
+    private final Propagator propagator;
 
     BatchLedgerProcessor(JdbcTemplate jdbc, MeterRegistry meters, TransactionTemplate tx,
-            @Value("${lab.tuning.f12:false}") boolean keyByDebtor, SettlementAccounts settlement) {
+            @Value("${lab.tuning.f12:false}") boolean keyByDebtor, SettlementAccounts settlement,
+            ObjectProvider<Tracer> tracer, ObjectProvider<Propagator> propagator) {
         this.settlement = settlement;
+        this.tracer = tracer.getIfAvailable();
+        this.propagator = propagator.getIfAvailable();
         this.jdbc = jdbc;
         this.meters = meters;
         this.tx = tx;
@@ -92,14 +101,15 @@ class BatchLedgerProcessor {
     }
 
     /** @param shardHint the source partition of the batch: it picks the settlement shard when F-11 is on */
-    void process(List<PaymentValidated> events, int shardHint) {
-        tx.executeWithoutResult(status -> new Run(events, shardHint).execute());
+    void process(List<PaymentValidated> events, int shardHint, Map<UUID, String> traceparents) {
+        tx.executeWithoutResult(status -> new Run(events, shardHint, traceparents).execute());
     }
 
     /** All mutable state of one batch. */
     private final class Run {
         private final List<PaymentValidated> events;
         private final int shardHint;
+        private final Map<UUID, String> traceparents;
         private final Map<String, Acct> accts = new HashMap<>();
         private Map<String, TreeMap<Long, PaymentValidated>> pending;
         private final Set<UUID> seen = new HashSet<>();
@@ -110,9 +120,10 @@ class BatchLedgerProcessor {
         private final List<PendingRow> pendingInserts = new ArrayList<>();
         private final List<PendingRow> pendingDeletes = new ArrayList<>();
 
-        Run(List<PaymentValidated> events, int shardHint) {
+        Run(List<PaymentValidated> events, int shardHint, Map<UUID, String> traceparents) {
             this.events = events;
             this.shardHint = shardHint;
+            this.traceparents = traceparents;
         }
 
         void execute() {
@@ -265,7 +276,14 @@ class BatchLedgerProcessor {
                     Ids.eventId(e.paymentId(), "posted"), e.eventId(), e.paymentId(), e.clientId(),
                     e.merchantId(), e.debtorAccountId(), outcome, reason, Instant.now());
             // F-12: keyed by debtor account id in tuned.
-            outbox.add(new OutboxRow(keyByDebtor ? e.debtorAccountId() : e.merchantId(), Json.write(posted)));
+            // A batch consumer has one span for many payments, which would not continue any payment's own trace. So each
+            // outcome is written under a short span that is a child of that payment's trace, taken from the record's
+            // traceparent header, and the outbox publisher continues from there.
+            String parent = traceparents.get(e.paymentId());
+            String trace = parent != null
+                    ? TraceCarrier.within(tracer, propagator, parent, "ledger.apply", () -> TraceCarrier.capture(tracer, propagator))
+                    : TraceCarrier.capture(tracer, propagator);
+            outbox.add(new OutboxRow(keyByDebtor ? e.debtorAccountId() : e.merchantId(), Json.write(posted), trace));
             seen.add(e.paymentId());
             meters.counter("ledger.applied", "outcome", outcome.name()).increment();
         }
@@ -287,9 +305,10 @@ class BatchLedgerProcessor {
                 ps.setString(3, r.direction());
                 ps.setLong(4, r.amount());
             });
-            jdbc.batchUpdate("INSERT INTO outbox(msg_key, payload) VALUES (?,?)", outbox, 500, (ps, r) -> {
+            jdbc.batchUpdate("INSERT INTO outbox(msg_key, payload, trace) VALUES (?,?,?)", outbox, 500, (ps, r) -> {
                 ps.setString(1, r.key());
                 ps.setString(2, r.payload());
+                ps.setString(3, r.trace());
             });
             jdbc.batchUpdate("""
                     INSERT INTO pending_payments(debtor_account_id, debtor_seq, payload) VALUES (?,?,?)

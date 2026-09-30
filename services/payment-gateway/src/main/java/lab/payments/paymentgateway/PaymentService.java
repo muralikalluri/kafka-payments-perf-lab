@@ -2,6 +2,10 @@ package lab.payments.paymentgateway;
 
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.tracing.Tracer;
+import io.micrometer.tracing.propagation.Propagator;
+import lab.payments.common.TraceCarrier;
+import org.springframework.beans.factory.ObjectProvider;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -37,13 +41,18 @@ public class PaymentService {
 
     private final boolean keyByDebtor;
     private final boolean outbox;
+    private final Tracer tracer;
+    private final Propagator propagator;
     private final TransactionTemplate tx;
     private final Counter accepted;
     private final Counter replayed;
 
     public PaymentService(JdbcTemplate jdbc, KafkaTemplate<String, String> kafka, MeterRegistry meters,
             @Value("${lab.tuning.f12:false}") boolean keyByDebtor,
-            @Value("${lab.tuning.f07:false}") boolean outbox, TransactionTemplate tx) {
+            @Value("${lab.tuning.f07:false}") boolean outbox, TransactionTemplate tx,
+            ObjectProvider<Tracer> tracer, ObjectProvider<Propagator> propagator) {
+        this.tracer = tracer.getIfAvailable();
+        this.propagator = propagator.getIfAvailable();
         this.keyByDebtor = keyByDebtor;
         this.outbox = outbox;
         this.tx = tx;
@@ -113,7 +122,8 @@ public class PaymentService {
                         req.debtorAccountId(), req.creditorAccountId(), req.merchantId(),
                         req.amountMinor(), req.currency(), seq, Instant.now());
                 String key = keyByDebtor ? req.debtorAccountId() : req.merchantId();
-                jdbc.update("INSERT INTO outbox(msg_key, payload) VALUES (?,?)", key, Json.write(event));
+                jdbc.update("INSERT INTO outbox(msg_key, payload, trace) VALUES (?,?,?)", key, Json.write(event),
+                        TraceCarrier.capture(tracer, propagator));
                 accepted.increment();
                 return response;
             });

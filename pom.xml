@@ -19,6 +19,7 @@
   <properties>
     <java.version>21</java.version>
     <lab.profile>baseline</lab.profile>
+    <lab.tracing>false</lab.tracing>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
   </properties>
 
@@ -42,6 +43,7 @@
               <!-- Docker 29+ rejects the API version docker-java defaults to (Testcontainers 1.21). -->
               <api.version>1.44</api.version>
               <lab.profile>${lab.profile}</lab.profile>
+              <lab.tracing>${lab.tracing}</lab.tracing>
             </systemPropertyVariables>
           </configuration>
         </plugin>

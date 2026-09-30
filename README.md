@@ -87,7 +87,8 @@ Results land in `results/<date>_<profile>_<scenario>/` (`result.json`, `summary.
 - 4 services (gateway, validation, ledger and a notification service with a webhook simulator), on a single Kafka broker with replication factor 1 in KRaft mode, Postgres with Flyway, and Redis for the tuned cache.
 - Profiles: `baseline` carries common real-world anti-patterns on purpose; `tuned` fixes each numbered finding behind its own flag, one commit per finding.
 - Load scenarios in k6 (smoke, steady stepped arrival rate, spike) and a runner that resets the stack, records the environment, checks the ledger invariants and derives every figure from the database and k6 output.
-- Micrometer metrics, Prometheus, Kafka and Postgres exporters and one provisioned Grafana dashboard.
+- Micrometer metrics, Prometheus, Kafka and Postgres exporters and one provisioned Grafana dashboard, with per-stage metric snapshots stored beside each result.
+- Distributed tracing (OpenTelemetry to Jaeger) that follows one payment across the services, through the Kafka hops and the outbox publishers. Sampling is off during benchmarks; give the services a `TRACING_SAMPLING` fraction to see traces in the Jaeger UI at `localhost:16686`.
 - Query-plan evidence (`EXPLAIN (ANALYZE, BUFFERS)`) captured after every run.
 - A sample audit report and a single-service quick audit, generated from the results with a lint that rejects any hand-typed number.
 
@@ -132,12 +133,12 @@ Built to the MVP cut in [SPEC.md](SPEC.md) first, then the items SPEC marks Late
 | Three-broker Kafka cluster | done | docker-compose.yml |
 | Soak scenario | done | load/k6/soak.js |
 | Gatling scenarios | not built | load/gatling/ |
-| Distributed tracing to Jaeger | not built | docker-compose.yml |
-| JFR recordings and flame graphs | not built | scripts/flamegraph.py |
+| Distributed tracing to Jaeger | done | docker-compose.yml |
+| JFR recordings and flame graphs | done | scripts/flamegraph.py |
 | PDF export of the reports | not built | scripts/export_pdf.js |
 | Reusable report template folder | not built | report/template/ |
 
-Not built (marked Later in SPEC.md): Gatling scenarios; Distributed tracing to Jaeger; JFR recordings and flame graphs; PDF export of the reports; Reusable report template folder.
+Not built (marked Later in SPEC.md): Gatling scenarios; PDF export of the reports; Reusable report template folder.
 
 Known gaps in what was built: no load shedding on the gateway outbox backlog; some results predate the per-stage metric snapshots (consumer lag, CPU, garbage collection, connection pools, locks), so those runs have none stored; FX rates are cached in process rather than in Redis; connection-pool sizes are unswept lab choices; the cache accepts bounded staleness (a blocked account can be approved until its cached copy is invalidated or expires).
 

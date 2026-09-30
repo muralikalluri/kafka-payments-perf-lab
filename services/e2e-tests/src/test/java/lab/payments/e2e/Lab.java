@@ -36,6 +36,12 @@ final class Lab {
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16");
     static final org.testcontainers.containers.GenericContainer<?> REDIS =
             new org.testcontainers.containers.GenericContainer<>("redis:7").withExposedPorts(6379);
+    /** Opt-in (-Dlab.tracing=true): a Jaeger container the services export traces to, with sampling at 100%. */
+    static final boolean TRACING = Boolean.getBoolean("lab.tracing");
+    static final org.testcontainers.containers.GenericContainer<?> JAEGER =
+            new org.testcontainers.containers.GenericContainer<>("jaegertracing/all-in-one:1.62.0")
+                    .withExposedPorts(4318, 16686).withEnv("COLLECTOR_OTLP_ENABLED", "true")
+                    .waitingFor(org.testcontainers.containers.wait.strategy.Wait.forHttp("/").forPort(16686));
     static final KafkaContainer KAFKA = new KafkaContainer("apache/kafka:3.8.0");
     static final JdbcTemplate JDBC;
     static final ConfigurableApplicationContext NOTIFICATION;
@@ -53,6 +59,9 @@ final class Lab {
         KAFKA.start();
         if ("tuned".equals(PROFILE)) {
             REDIS.start();
+        }
+        if (TRACING) {
+            JAEGER.start();
         }
         System.setProperty("LAB_PROFILE", PROFILE);
         // Fast retries so a failing webhook reaches its final state within a test.
@@ -93,6 +102,10 @@ final class Lab {
                 "--spring.datasource.password=" + POSTGRES.getPassword(),
                 "--spring.kafka.bootstrap-servers=" + KAFKA.getBootstrapServers()));
         args.addAll(List.of(extra));
+        if (TRACING) {
+            args.add("--management.tracing.sampling.probability=1.0");
+            args.add("--management.otlp.tracing.endpoint=http://localhost:" + JAEGER.getMappedPort(4318) + "/v1/traces");
+        }
         if (REDIS.isRunning()) {
             args.add("--spring.data.redis.host=" + REDIS.getHost());
             args.add("--spring.data.redis.port=" + REDIS.getMappedPort(6379));

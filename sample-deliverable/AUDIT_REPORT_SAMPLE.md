@@ -314,6 +314,10 @@ quadrantChart
 
 _(no soak runs are recorded)_
 
+**Profiling** (Java Flight Recorder samples running threads on a fixed interval: the CPU view shows where Java code ran, the native view where threads were blocked in native calls such as socket reads. It shows where sampled time went, not everything a thread waited on):
+
+_(no profiling runs are recorded)_
+
 **Broker failure tests**
 
 _(no broker-failure runs are recorded)_

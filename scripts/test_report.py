@@ -237,6 +237,25 @@ class SoakTest(unittest.TestCase):
         self.assertIn("60 req/s for 2 minutes", L.params_table(runs))
 
 
+class ProfilingTest(unittest.TestCase):
+    def test_profiled_runs_stay_out_of_the_ladder_and_render(self):
+        runs = L.load_runs()
+        before = (L.steady_bounds(runs, "tuned"), L.cold_first_step_note(runs))
+        fake = copy.deepcopy(runs["tuned_steady"])
+        fake.suffix, fake.key = "flame", "tuned_steady_flame"
+        for phase in fake.phases:
+            phase["meets_slo"] = False
+        fake.profile_summary = {"payment-gateway": {"cpu": {"samples": 100, "top_frames": [
+            {"frame": "a.b.C.run", "samples": 40, "share": 0.4}]}, "native": {"samples": 10, "top_frames": []}}}
+        runs["tuned_steady_flame"] = fake
+        self.assertEqual((L.steady_bounds(runs, "tuned"), L.cold_first_step_note(runs)), before)
+        text = L.profile_tables(runs)
+        self.assertIn("flamegraph-cpu-payment-gateway.svg", text)
+        self.assertIn("40%", text)
+        self.assertIn("profiled with Java Flight Recorder", L.run_label(fake))
+        self.assertIn("no profiling runs", L.profile_tables(L.load_runs()) if not any(r.profile_summary for r in L.load_runs().values()) else "no profiling runs")
+
+
 class RoadmapTest(unittest.TestCase):
     def setUp(self):
         self.fs = G.findings()

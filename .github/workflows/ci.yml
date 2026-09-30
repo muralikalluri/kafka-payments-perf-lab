@@ -19,6 +19,10 @@ jobs:
         run: mvn -B verify
       - name: Invariant and pipeline tests (tuned profile)
         run: mvn -B verify -Dlab.profile=tuned -pl services/e2e-tests -am
+      - name: Tracing test (Jaeger container, both profiles)
+        run: |
+          mvn -B verify -Dlab.tracing=true -Dtest=TracingTest -Dsurefire.failIfNoSpecifiedTests=false -pl services/e2e-tests -am
+          mvn -B verify -Dlab.profile=tuned -Dlab.tracing=true -Dtest=TracingTest -Dsurefire.failIfNoSpecifiedTests=false -pl services/e2e-tests -am
       - name: Report tooling (no bare numbers in report templates, generated reports are fresh)
         run: |
           python3 scripts/lint_report_numbers.py

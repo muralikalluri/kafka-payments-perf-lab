@@ -31,6 +31,7 @@ class Run:
     topics: dict = field(default_factory=dict)
     tuned_config: str = ""
     topic_details: dict = field(default_factory=dict)
+    profile_summary: dict = field(default_factory=dict)
     explain: str | None = None
 
     @property
@@ -80,12 +81,16 @@ def load_runs(results_dir: str | None = None) -> dict:
             result = json.load(fh)
         with open(os.path.join(path, "env.txt")) as fh:
             env, limits, topics, tuned, details = _parse_env(fh.read())
+        profile_summary = {}
+        if os.path.exists(os.path.join(path, "profile-summary.json")):
+            with open(os.path.join(path, "profile-summary.json")) as fh:
+                profile_summary = json.load(fh)
         explain = None
         if os.path.exists(os.path.join(path, "explain.txt")):
             with open(os.path.join(path, "explain.txt")) as fh:
                 explain = fh.read()
         runs[key] = Run(key, path, date, profile, scenario, suffix, result, env, limits, topics, tuned,
-                        explain=explain, topic_details=details)
+                        explain=explain, topic_details=details, profile_summary=profile_summary)
     return runs
 
 
@@ -117,6 +122,8 @@ def run_label(run: Run) -> str:
         label += " (recorded during the dashboard capture)"
     if is_failover(run):
         label += " (brokers stopped during the load)"
+    if is_profiled(run):
+        label += " (profiled with Java Flight Recorder)"
     return label
 
 
@@ -143,9 +150,13 @@ def is_failover(run: Run) -> bool:
     return bool(run.suffix) and run.suffix.startswith("failover")
 
 
+def is_profiled(run: Run) -> bool:
+    return bool(run.suffix) and run.suffix.startswith("flame")
+
+
 def is_ladder(run: Run) -> bool:
-    """A steady run that climbs a ladder of offered rates (standard or extended), not a fault-injection run."""
-    return run.scenario == "steady" and not is_failover(run)
+    """A steady run that climbs a ladder of offered rates (standard or extended), not a fault-injection or profiling run."""
+    return run.scenario == "steady" and not is_failover(run) and not is_profiled(run)
 
 
 def pass_through(run: Run):
@@ -453,4 +464,24 @@ def soak_tables(runs: dict) -> str:
         if growth:
             out.append(table(["Series (last quarter average over first quarter average)", "Ratio"],
                              [[k, f"{v:.2f}"] for k, v in sorted(growth.items())]))
+    return "\n\n".join(out)
+
+
+def profile_tables(runs: dict) -> str:
+    """Hottest leaf frames per service and view from JFR, with links to the flame graphs."""
+    profiled = [runs[k] for k in sorted(runs) if runs[k].profile_summary]
+    if not profiled:
+        return "_(no profiling runs are recorded)_"
+    out = []
+    for r in profiled:
+        rows = []
+        links = []
+        for service, views in sorted(r.profile_summary.items()):
+            for view, data in views.items():
+                top = "; ".join(f"`{f['frame'].rsplit('.', 2)[-2] + '.' + f['frame'].rsplit('.', 1)[-1] if f['frame'].count('.') > 1 else f['frame']}` "
+                                f"{f['share'] * 100:.0f}%" for f in data["top_frames"][:3])
+                rows.append([service, view, data["samples"], top or "no samples"])
+                links.append(f"[{service} {view}](../{rel(r.dir)}/flamegraph-{view}-{service}.svg)")
+        out.append(f"**{r.profile}** ({run_label(r)}); flame graphs: " + ", ".join(links) + "\n\n"
+                   + table(["Service", "View", "Samples", "Hottest frames (share of samples)"], rows))
     return "\n\n".join(out)

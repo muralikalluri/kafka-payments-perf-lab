@@ -1,6 +1,10 @@
 package lab.payments.ledgerservice;
 
 import io.micrometer.core.instrument.Gauge;
+import io.micrometer.tracing.Tracer;
+import io.micrometer.tracing.propagation.Propagator;
+import lab.payments.common.TraceCarrier;
+import org.springframework.beans.factory.ObjectProvider;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.util.ArrayList;
 import java.util.List;
@@ -18,15 +22,20 @@ import org.springframework.stereotype.Component;
 @Component
 class OutboxPublisher {
 
-    private record Row(long id, String key, String payload) {
+    private record Row(long id, String key, String payload, String trace) {
     }
 
     private final JdbcTemplate jdbc;
     private final KafkaTemplate<String, String> kafka;
     private final boolean asyncSend;
+    private final Tracer tracer;
+    private final Propagator propagator;
 
     OutboxPublisher(JdbcTemplate jdbc, KafkaTemplate<String, String> kafka, MeterRegistry meters,
-            @Value("${lab.tuning.f01:false}") boolean asyncSend) {
+            @Value("${lab.tuning.f01:false}") boolean asyncSend,
+            ObjectProvider<Tracer> tracer, ObjectProvider<Propagator> propagator) {
+        this.tracer = tracer.getIfAvailable();
+        this.propagator = propagator.getIfAvailable();
         this.jdbc = jdbc;
         this.kafka = kafka;
         this.asyncSend = asyncSend;
@@ -46,15 +55,15 @@ class OutboxPublisher {
     @Scheduled(fixedDelayString = "${lab.outbox.poll-ms:250}")
     synchronized void flush() {
         List<Row> rows = jdbc.query(
-                "SELECT id, msg_key, payload FROM outbox ORDER BY id LIMIT 500",
-                (rs, i) -> new Row(rs.getLong(1), rs.getString(2), rs.getString(3)));
+                "SELECT id, msg_key, payload, trace FROM outbox ORDER BY id LIMIT 500",
+                (rs, i) -> new Row(rs.getLong(1), rs.getString(2), rs.getString(3), rs.getString(4)));
         if (asyncSend) {
             flushAsync(rows);
             return;
         }
         for (Row row : rows) {
             try {
-                kafka.send(Topics.POSTED, row.key(), row.payload()).get(10, TimeUnit.SECONDS);
+                send(row).get(10, TimeUnit.SECONDS);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 return;
@@ -69,11 +78,17 @@ class OutboxPublisher {
      * F-01 (tuned): send the batch without waiting per record and delete only the acknowledged rows.
      * Unacknowledged rows stay in the outbox and are retried; the gateway's status update is idempotent.
      */
+    /** The send runs inside a span whose parent is the trace of the consumer span that wrote the row. */
+    private CompletableFuture<org.springframework.kafka.support.SendResult<String, String>> send(Row row) {
+        return TraceCarrier.within(tracer, propagator, row.trace(), "ledger.outbox.publish",
+                () -> kafka.send(Topics.POSTED, row.key(), row.payload()));
+    }
+
     private void flushAsync(List<Row> rows) {
         ConcurrentLinkedQueue<Long> acked = new ConcurrentLinkedQueue<>();
         List<CompletableFuture<?>> pending = new ArrayList<>();
         for (Row row : rows) {
-            pending.add(kafka.send(Topics.POSTED, row.key(), row.payload()).whenComplete((result, error) -> {
+            pending.add(send(row).whenComplete((result, error) -> {
                 if (error == null) {
                     acked.add(row.id());
                 }
