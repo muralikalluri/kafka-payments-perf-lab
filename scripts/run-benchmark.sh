@@ -25,13 +25,13 @@ cd "$ROOT"
 SERVICES="payment-gateway validation-service ledger-service"
 
 if [ "$PROFILE" = tuned ]; then
-  for s in $SERVICES; do
-    if [ ! -f "services/$s/src/main/resources/$s-tuned.yml" ]; then
-      echo "The tuned profile is not implemented yet (M4): services/$s/src/main/resources/$s-tuned.yml is missing." >&2
-      echo "Refusing to run so a baseline run cannot be recorded as tuned." >&2
-      exit 2
-    fi
-  done
+  # The last M4 commit sets lab.tuning.complete=true in the gateway's tuned config. Until then a
+  # tuned run would be a partial mix of baseline and tuned behaviour and must not be recorded.
+  if ! grep -q 'complete: true' "services/payment-gateway/src/main/resources/payment-gateway-tuned.yml" 2>/dev/null; then
+    echo "The tuned profile is not complete yet (lab.tuning.complete is not true in payment-gateway-tuned.yml)." >&2
+    echo "Refusing to run so a partially tuned build cannot be recorded as tuned." >&2
+    exit 2
+  fi
 fi
 
 COMPOSE="docker compose -f docker-compose.yml -f docker-compose.resources.yml"
@@ -91,6 +91,13 @@ echo "==> environment"
     docker inspect -f '{{index .Config.Labels "com.docker.compose.service"}} {{.HostConfig.NanoCpus}} {{.HostConfig.Memory}}' "$c" \
       | awk '{printf "limit %s cpus=%.2f mem_bytes=%s\n", $1, $2/1000000000, $3}'
   done
+  if [ "$PROFILE" = tuned ]; then
+    echo "tuned_config:"
+    for s in $SERVICES; do
+      echo "  --- $s-tuned.yml"
+      grep -vE '^\s*(#|$)' "services/$s/src/main/resources/$s-tuned.yml" | sed 's/^/  /'
+    done
+  fi
   echo "topics:"
   $COMPOSE exec -T kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --describe 2>/dev/null \
     | grep '^Topic:' | sed 's/^/  /' || true

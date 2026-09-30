@@ -1,0 +1,4 @@
+# TUNED profile (SPEC.md §3). Each finding adds its own keys below, referencing its F-id.
+# Baseline anti-patterns live in *-baseline.yml and must not be changed.
+# Profiles are per database: a database migrated by the tuned profile is not reused by baseline
+# (run-benchmark.sh resets volumes before every run).
