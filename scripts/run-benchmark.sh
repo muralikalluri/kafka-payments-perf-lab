@@ -2,7 +2,7 @@
 # Runs one k6 scenario against one profile from a clean state and writes results/<date>_<profile>_<scenario>/.
 # Usage: ./scripts/run-benchmark.sh <baseline|tuned> <smoke|steady|spike>
 # Scenario knobs (env): STEPS, STEP_SECONDS (steady); BASE_RATE, WARM_SECONDS, BURST_SECONDS,
-# RECOVER_SECONDS (spike). They are recorded in result.json.
+# RECOVER_SECONDS (spike). They are recorded in result.json. RUN_SUFFIX appends to the results folder name.
 set -euo pipefail
 
 # A machine that sleeps mid-run produces invalid timings (and can stall the run), so hold a
@@ -35,7 +35,8 @@ if [ "$PROFILE" = tuned ]; then
 fi
 
 COMPOSE="docker compose -f docker-compose.yml -f docker-compose.resources.yml"
-RUN_DIR="results/$(date +%Y-%m-%d)_${PROFILE}_${SCENARIO}"
+# RUN_SUFFIX distinguishes extra runs of the same scenario (for example a steady run with a higher step list).
+RUN_DIR="results/$(date +%Y-%m-%d)_${PROFILE}_${SCENARIO}${RUN_SUFFIX:+_$RUN_SUFFIX}"
 if [ -e "$RUN_DIR" ]; then
   echo "$RUN_DIR already exists; move or delete it first." >&2
   exit 2
