@@ -105,6 +105,12 @@ echo "==> environment"
 } > "$RUN_DIR/env.txt"
 
 echo "==> k6 $SCENARIO"
+# Sample per-container CPU and memory for the whole load and drain phase (summarised into metrics.json).
+# Only this compose project's containers: the machine may run unrelated ones that must not end up in results.
+( while true; do docker stats --no-stream --format '{{json .}}' $($COMPOSE ps -q) >> "$RUN_DIR/raw/docker-stats.jsonl" 2>/dev/null; sleep 3; done ) &
+STATS_PID=$!
+PIDS="$PIDS $STATS_PID"
+METRICS_START="$(python3 -c 'import time; print(time.time())')"
 set +e
 SUMMARY_PATH="$RUN_DIR/summary.json" k6 run --quiet "load/k6/$SCENARIO.js" 2>&1 | tee "$RUN_DIR/raw/k6.log"
 K6_EXIT=${PIPESTATUS[0]}
@@ -119,6 +125,13 @@ for i in $(seq 1 300); do
   sleep 1
 done
 [ "$left" = 0 ] || echo "WARNING: $left payments still not terminal after 300 s; invariants will fail" >&2
+
+METRICS_END="$(python3 -c 'import time; print(time.time())')"
+kill "$STATS_PID" 2>/dev/null || true
+
+echo "==> stage metrics snapshot"
+python3 scripts/capture_metrics.py --run-dir "$RUN_DIR" --start "$METRICS_START" --end "$METRICS_END" \
+  || echo "WARNING: could not capture the metric snapshot" >&2
 
 echo "==> explain plans (F-06 evidence)"
 ./scripts/explain-analyze.sh "$RUN_DIR"
