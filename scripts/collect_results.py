@@ -199,12 +199,15 @@ def main():
         recovered = last_slow is None or last_slow < run_end - 5
         result["phases_unattributed_payments"] = overall["count"] - sum(p["e2e_ms"]["count"] for p in result["phases"])
         result["spike"] = {
-            "recovery_seconds_after_burst": round(recovery, 1),
+            # When the pipeline had not recovered by the end of the run the true value is unknown (it is at
+            # least the window), so it is null rather than a number that looks like a measurement.
+            "recovery_seconds_after_burst": round(recovery, 1) if recovered else None,
+            "recovery_at_least_seconds": round(recovery, 1),
             "recovered_within_run": recovered,
             "recovery_definition": "seconds after the burst ends until payments created afterwards "
                                    "complete under the 500 ms SLO again (last slow payment's creation time)",
         }
-        slo["lag_recovers_within_2min"] = recovered and recovery <= SLO_RECOVERY_SECONDS
+        slo["lag_recovers_within_2min"] = recovered and recovery <= SLO_RECOVERY_SECONDS  # e2e-latency proxy, not consumer lag
     result["slo"] = slo
 
     with open(os.path.join(a.run_dir, "result.json"), "w") as fh:
