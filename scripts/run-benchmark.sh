@@ -56,11 +56,28 @@ echo "==> reset stack (volumes dropped so every run starts from the same state)"
 $COMPOSE down -v --remove-orphans >/dev/null 2>&1
 $COMPOSE up -d --wait --wait-timeout 240 >/dev/null
 
+# F-10: JVM options. Baseline runs the JVM defaults. Tuned fixes the heap (no resizing, sized well above the peak seen in
+# metrics.json) and picks a collector: LAB_GC=g1 (default, with a pause target) or LAB_GC=zgc (generational) for the
+# G1/ZGC comparison. The services run on the host, not in containers, so this is a fixed size rather than a
+# container-aware percentage. BENCH_JVM_OPTS overrides everything (an empty value forces the defaults).
+LAB_GC="${LAB_GC:-g1}"
+if [ "${BENCH_JVM_OPTS+set}" = set ]; then
+  JVM_OPTS="$BENCH_JVM_OPTS"
+elif [ "$PROFILE" = tuned ]; then
+  case "$LAB_GC" in
+    g1)  JVM_OPTS="-Xms512m -Xmx512m -XX:+UseG1GC -XX:MaxGCPauseMillis=50" ;;
+    zgc) JVM_OPTS="-Xms512m -Xmx512m -XX:+UseZGC -XX:+ZGenerational" ;;
+    *)   echo "LAB_GC must be g1 or zgc" >&2; exit 2 ;;
+  esac
+else
+  JVM_OPTS=""
+fi
+
 echo "==> start services (profile: $PROFILE)"
 for s in $SERVICES; do
   env ${BENCH_SERVICE_ENV:-} LAB_TOPIC_REPLICAS="${LAB_TOPIC_REPLICAS:-3}" \
     KAFKA_BOOTSTRAP="${KAFKA_BOOTSTRAP:-localhost:9092,localhost:9094,localhost:9096}" \
-    LAB_PROFILE="$PROFILE" nohup java -jar "services/$s/target/$s-0.1.0-SNAPSHOT-exec.jar" \
+    LAB_PROFILE="$PROFILE" nohup java $JVM_OPTS -jar "services/$s/target/$s-0.1.0-SNAPSHOT-exec.jar" \
     > "$RUN_DIR/raw/$s.log" 2>&1 &
   PIDS="$PIDS $!"
 done
@@ -89,6 +106,7 @@ echo "==> environment"
     echo "cpu_cores=$(nproc)"
     echo "ram_bytes=$(awk '/MemTotal/ {print $2*1024}' /proc/meminfo)"
   fi
+  echo "jvm_opts=${JVM_OPTS:-defaults}"
   echo "ablation=${BENCH_SERVICE_ENV:-none}"
   echo "kafka_brokers=$($COMPOSE ps --services | grep -c '^kafka-[0-9]')"
   echo "webhook_latency_ms=${WEBHOOK_LATENCY_MS:-5} webhook_failure_rate=${WEBHOOK_FAILURE_RATE:-0}"

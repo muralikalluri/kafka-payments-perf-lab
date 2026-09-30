@@ -9,6 +9,7 @@ lab:
     # sets it because each one's KafkaAdmin creates or grows the shared topics.
     partitions: 12
   tuning:
+    f10: true
     f05: true
     f09: true
     complete: true   # every MVP finding (F-01, F-03, F-04, F-06, F-07, F-08, F-12, F-13) is implemented; run-benchmark.sh checks this
@@ -18,6 +19,9 @@ lab:
     f12: true
 
 spring:
+  threads:
+    virtual:
+      enabled: true   # F-10: request threads are virtual; the gateway's JDBC and Kafka calls block, which virtual threads make cheap
   kafka:
     listener:
       # F-03: consumer concurrency matched to the partition count (one thread per partition).
