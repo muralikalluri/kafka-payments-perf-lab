@@ -10,6 +10,7 @@ lab:
     partitions: 12
   tuning:
     # F-12: key by debtor account id. F-01 / F-07 flags select async publishing / the gateway outbox.
+    f08: true
     f12: true
 
 spring:
@@ -29,3 +30,6 @@ spring:
       # far more threads than connections. Lab choice, not swept; see docs/adr/0004-outbox-and-tuning.md.
       maximum-pool-size: 6
       connection-timeout: 5000
+  # F-08: tuned-only migration (account_limits index) in a separate Flyway location and version range.
+  flyway:
+    locations: classpath:db/validation,classpath:db/validation-tuned

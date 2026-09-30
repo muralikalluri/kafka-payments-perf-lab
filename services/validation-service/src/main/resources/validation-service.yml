@@ -1,5 +1,6 @@
 lab:
   tuning:
+    f08: false   # F-08: projection query + Caffeine (baseline: JPA lazy loading, N+1)
     f12: false   # F-12: record key = debtor account id (baseline: merchant id)
 spring:
   application:
