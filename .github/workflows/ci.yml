@@ -15,7 +15,9 @@ jobs:
           distribution: temurin
           java-version: "21"
           cache: maven
-      - name: Build and test
+      - name: Build and test (baseline profile)
         run: mvn -B verify
+      - name: Invariant and pipeline tests (tuned profile)
+        run: mvn -B verify -Dlab.profile=tuned -pl services/e2e-tests -am
       - name: Validate compose files
         run: docker compose -f docker-compose.yml -f docker-compose.resources.yml config -q
