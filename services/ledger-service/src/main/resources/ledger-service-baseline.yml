@@ -4,6 +4,11 @@ lab:
     partitions: 3          # F-12
 spring:
   kafka:
+    producer:
+      properties:
+        # F-02: acks=all but one in-flight request and no idempotence (set explicitly, see the gateway baseline).
+        enable.idempotence: false
+        max.in.flight.requests.per.connection: 1
     listener:
       concurrency: 1       # F-03: single consumer thread
   # F-07: Hikari left at defaults (10 connections)

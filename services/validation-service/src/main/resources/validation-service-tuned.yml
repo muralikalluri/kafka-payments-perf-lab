@@ -35,6 +35,9 @@ spring:
       compression-type: lz4
       batch-size: 65536
       properties:
+        # F-02: idempotent producer, acks=all, five requests in flight (safe with idempotence, keeps order per partition).
+        enable.idempotence: true
+        max.in.flight.requests.per.connection: 5
         # Validation sends one record per listener call and must wait for the ack before the offset is
         # committed, so lingering would only add latency here: F-01 is compression only in this service.
         linger.ms: 0

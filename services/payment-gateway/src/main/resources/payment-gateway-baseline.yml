@@ -9,6 +9,10 @@ spring:
       compression-type: none
       properties:
         linger.ms: 0
+        # F-02: acks=all but ONE in-flight request and NO idempotence (Kafka 3.x clients would otherwise default to
+        # idempotence on with five in flight). Ordering is kept, throughput pays, retries can duplicate records.
+        enable.idempotence: false
+        max.in.flight.requests.per.connection: 1
     listener:
       concurrency: 1       # F-03
   # F-07: Hikari left at defaults (10 connections) against Tomcat's 200 request threads

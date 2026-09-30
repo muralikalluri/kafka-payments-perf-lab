@@ -262,6 +262,11 @@ final class Lab {
         }
     }
 
+    /** Postings written per applied payment: the two customer legs (F-11 adds two settlement legs, see there). */
+    static int postingsPerPayment() {
+        return 2;
+    }
+
     static boolean tuned() {
         return "tuned".equals(PROFILE);
     }

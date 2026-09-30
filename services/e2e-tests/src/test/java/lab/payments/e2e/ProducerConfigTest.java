@@ -35,4 +35,20 @@ class ProducerConfigTest {
             }
         }
     }
+
+    /** F-02: idempotence and in-flight requests are set explicitly in both profiles (never left to client defaults). */
+    @Test
+    void idempotenceAndInFlightFollowTheProfile() {
+        for (ConfigurableApplicationContext ctx : new ConfigurableApplicationContext[] {Lab.GATEWAY, Lab.VALIDATION, Lab.LEDGER}) {
+            Map<String, Object> config = producerConfig(ctx);
+            String service = ctx.getEnvironment().getProperty("spring.application.name");
+            assertThat(config.get("enable.idempotence")).as(service + " enable.idempotence must be explicit").isNotNull();
+            assertThat(config.get("max.in.flight.requests.per.connection")).as(service + " in-flight must be explicit").isNotNull();
+            assertThat(String.valueOf(config.get("enable.idempotence"))).as(service)
+                    .isEqualTo(Lab.tuned() ? "true" : "false");
+            assertThat(String.valueOf(config.get("max.in.flight.requests.per.connection"))).as(service)
+                    .isEqualTo(Lab.tuned() ? "5" : "1");
+            assertThat(String.valueOf(config.get("acks"))).as(service + " acks").isEqualTo("all");
+        }
+    }
 }
