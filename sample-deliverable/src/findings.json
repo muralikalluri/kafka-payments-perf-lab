@@ -1,0 +1,90 @@
+[
+  {
+    "id": "F-01",
+    "title": "Producer sends one record at a time, synchronously, without batching or compression",
+    "area": "Kafka producer",
+    "impact": 2,
+    "effort": "S",
+    "risk": "Low",
+    "plan": "Next sprint",
+    "depends_on": [
+      "F-07"
+    ]
+  },
+  {
+    "id": "F-03",
+    "title": "One consumer thread per service regardless of partition count",
+    "area": "Kafka consumer",
+    "impact": 4,
+    "effort": "S",
+    "risk": "Medium",
+    "plan": "Next sprint",
+    "depends_on": [
+      "F-12"
+    ]
+  },
+  {
+    "id": "F-04",
+    "title": "Ledger commits one record per transaction with one statement per round trip",
+    "area": "Ledger writes",
+    "impact": 5,
+    "effort": "M",
+    "risk": "High",
+    "plan": "Structural",
+    "depends_on": []
+  },
+  {
+    "id": "F-06",
+    "title": "No indexes on the idempotency lookup and on the daily-outflow query",
+    "area": "Database",
+    "impact": 4,
+    "effort": "S",
+    "risk": "Low",
+    "plan": "Quick wins",
+    "depends_on": []
+  },
+  {
+    "id": "F-07",
+    "title": "Gateway holds a connection and locks while it waits for the broker; pools left at defaults",
+    "area": "Gateway and pools",
+    "impact": 4,
+    "effort": "M",
+    "risk": "Medium",
+    "plan": "Next sprint",
+    "depends_on": [
+      "F-06"
+    ]
+  },
+  {
+    "id": "F-08",
+    "title": "Validation loads limits with lazy per-account queries (N+1)",
+    "area": "Validation reads",
+    "impact": 2,
+    "effort": "S",
+    "risk": "Low",
+    "plan": "Quick wins",
+    "depends_on": []
+  },
+  {
+    "id": "F-12",
+    "title": "Records keyed by merchant on few partitions",
+    "area": "Topic design",
+    "impact": 4,
+    "effort": "M",
+    "risk": "Medium",
+    "plan": "Next sprint",
+    "depends_on": []
+  },
+  {
+    "id": "F-13",
+    "title": "Every validation reads account status, limits and rates from Postgres",
+    "area": "Caching",
+    "impact": 3,
+    "effort": "L",
+    "risk": "High",
+    "plan": "Structural",
+    "depends_on": [
+      "F-08"
+    ]
+  }
+]

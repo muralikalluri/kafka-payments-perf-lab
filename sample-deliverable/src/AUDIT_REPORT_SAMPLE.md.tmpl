@@ -1,0 +1,203 @@
+# Performance audit report (sample deliverable)
+
+**Client:** Larkspur Pay, a fictional payments company. **System:** a credit-transfer pipeline of three Spring Boot services, Kafka and Postgres.
+
+> This is a sample deliverable produced from the lab in this repository. The client, the system and all data are fictional. Every figure below is generated from the committed benchmark results (`results/`) at git revision(s) {{env.git_shas}}; none is typed by hand. The report shows the method end to end: baseline, measure, diagnose, fix, re-measure, report. Read section 9 (limits of this evidence) before quoting any number.
+
+## 1. Executive summary
+
+**Capacity as found.** Under the stepped load scenario the baseline pipeline met the service-level objective (end-to-end p99 under {{slo.p99_ms}} ms, HTTP error rate under {{slo.error_rate}}, no dropped iterations) at every offered rate up to {{fact.baseline_pass}} req/s and missed it at {{fact.baseline_fail}} req/s. The true limit lies between those two steps.
+
+**After tuning.** With all eight changes applied, the tuned pipeline met the objective up to {{fact.tuned_pass}} req/s and missed it at {{fact.tuned_fail}} req/s; again the limit lies between those steps. {{fact.ranges_sentence}}
+
+**Spike behaviour.** The burst offered {{fact.spike_burst_rate}} req/s for {{fact.spike_burst_seconds}} s on top of a base of {{fact.spike_base_rate}} req/s. Baseline result: {{fact.spike_baseline}}. Tuned result: {{fact.spike_tuned}}. {{fact.tuned_spike_caveat}}
+
+**Correctness held throughout.** Across all {{fact.run_count}} recorded runs ({{fact.payments_total}} payments created in total), no balance went negative, debits equalled credits, and every payment reached a terminal state (section 4).
+
+**Where to start.** Ranked by assessed impact against effort (section 7): {{fact.quadrants}}. The recommended order differs slightly from the ranking because of dependencies (for example, more consumer threads only help after more partitions); section 7 gives the order.
+
+**What this report cannot tell you.** Only the combined effect of the eight changes was measured. The contribution of each finding was not isolated, and no per-stage measurements (consumer lag, CPU, garbage collection, lock waits) were captured, so no single component is named as the bottleneck.
+
+## 2. Scope and method
+
+**Environment.** {{env.cpu_model}}, {{env.cores}} cores, {{env.ram_gb}} GiB of memory, {{env.os}}, {{env.java}}, {{env.k6}}. Postgres, Kafka, Redis, Prometheus, Grafana and the exporters run in containers with fixed limits; the three services and the load generator run directly on the same machine, uncapped. {{env.note}}.
+
+{{table.limits}}
+
+**Objective.** End-to-end p99 (payment accepted until its terminal status is recorded at the gateway) under {{slo.p99_ms}} ms, HTTP error rate under {{slo.error_rate}}, no dropped load iterations, and recovery within {{slo.recovery_s}} s after a spike. The recovery check uses end-to-end latency as a stand-in for consumer lag; consumer lag itself was not recorded. The payload mix is eighty percent normal payments, ten percent replays of an earlier idempotency key and ten percent that fail validation. Half of all traffic belongs to one large merchant, which is what makes the record key matter (F-12).
+
+**Scenarios.** The step lists and durations were adjusted to the hardware, as the specification allows, and are recorded with each result:
+
+{{table.params}}
+
+**Procedure.** Before every run the stack is reset (volumes dropped) and the services are restarted under the profile being measured, so each run starts from the same database and topics. After the load, the run waits for the pipeline to drain, then checks the invariants and captures query plans. End-to-end latencies come from the database (`updated_at - created_at` of the gateway row), not from the services' own counters.
+
+**Run history, stated plainly.**
+- The baseline was first recorded before the tuned profile existed. After the tuned work, three fixes that also affect baseline behaviour were made (a lock-ordering fix in the ledger, the dead-letter destination, and a read-only validation transaction). The baseline was therefore **re-recorded** at the final revision so that before and after compare identical code. The earlier recording remains in the git history.
+- A first steady run was discarded because the machine went to sleep during it; the benchmark script now holds a sleep assertion.
+- Two additional tuned steady runs with higher step lists are kept. In both, the first step missed the objective. {{fact.cold_first_step}}
+
+## 3. Architecture as found
+
+```mermaid
+flowchart LR
+    Client -->|POST /payments| GW[payment-gateway]
+    GW -->|payments.initiated| VAL[validation-service]
+    VAL -->|payments.validated| LED[ledger-service]
+    LED -->|payments.posted| GW
+    GW --> PG[(Postgres: gateway schema)]
+    VAL --> PGV[(Postgres: validation schema)]
+    LED --> PGL[(Postgres: ledger schema)]
+    GW -. notification stub .-> N[notification]
+```
+
+A client submits a payment with an idempotency key. The gateway records it, assigns a per-debtor sequence number and publishes `payments.initiated`. Validation checks schema, ownership, status, limits and a sanctions stub, and publishes `payments.validated` for every payment, rejections included. The ledger applies payments once (a dedup record written in the same transaction as the postings), in per-debtor sequence order, with double-entry postings and a balance that cannot go negative. It publishes the outcome on `payments.posted`, and the gateway updates the payment status from that event. One Postgres instance holds a schema per service; no service reads another's schema.
+
+**Partitioning as found.** Every topic carries records keyed by merchant identifier, with these partition counts:
+
+{{table.partitions_baseline}}
+
+## 4. Baseline results
+
+**Steady (stepped constant arrival rate).**
+
+{{table.steady_baseline}}
+
+**Spike.** {{fact.spike_base_rate}} req/s, then {{fact.spike_burst_rate}} req/s for {{fact.spike_burst_seconds}} s, then back. Recovery: {{fact.spike_baseline}}.
+
+**Correctness checks after every run**, baseline and tuned:
+
+{{table.invariants}}
+
+## 5. Findings
+
+Each finding lists the evidence available, the expected impact, a recommendation, the effort (S, M or L) and the risk of making the change. Impact is **assessed** from the mechanism and the combined measurement; it was not isolated per finding.
+
+### F-01 Producer sends synchronously, without batching or compression
+
+- **Evidence.** In the baseline gateway the payment is published with a blocking send inside the database transaction, with `linger.ms` at {{cfg.baseline_linger_ms}} and no compression (`PaymentService`, `payment-gateway-baseline.yml`). The other services rely on Kafka's producer defaults.
+- **Impact.** Every request pays a broker round trip and produces small batches. On its own the effect is modest, because F-07 removes the send from the request path.
+- **Recommendation.** Publish from an outbox with asynchronous sends and a callback, `linger.ms` around {{cfg.tuned_linger_ms}}, a larger batch size ({{cfg.tuned_batch_size}} bytes here) and lz4 compression. Do not linger where a consumer must wait for each acknowledgement before committing its offset (validation).
+- **Effort / risk.** S / Low. Partial send failures can reorder events; the ledger orders by sequence number, so this is safe here.
+
+### F-03 One consumer thread regardless of partition count
+
+- **Evidence.** The baseline runs {{cfg.baseline_concurrency}} consumer thread per service over {{cfg.baseline_partitions}} partitions (`*-baseline.yml`); the tuned profile runs {{cfg.tuned_concurrency}}. `PartitioningTest` checks the consumer-group membership in both profiles.
+- **Impact.** A single thread caps each stage at one record's processing time at a time. Raising concurrency only helps if there are enough partitions (F-12) and enough database connections (F-07).
+- **Recommendation.** Match consumer threads to partitions per instance, after sizing the connection pools.
+- **Effort / risk.** S / Medium. Real parallelism exposes lock-ordering problems in the ledger; one was found and fixed while doing this work (a drain that took locks out of order).
+
+### F-04 Ledger commits one record per transaction
+
+- **Evidence.** `LedgerService.handle` opens a transaction per record and issues each statement in its own round trip (locks, dedup check, postings, balances, outbox). The tuned `BatchLedgerProcessor` applies a whole poll in one transaction with JDBC batches ({{cfg.tuned_max_poll_records}} records per poll here).
+- **Impact.** Assessed highest: it multiplies statements and commits per payment on the stage that writes the most rows and takes account locks. This is a judgement from the mechanism; per-stage timings were not captured.
+- **Recommendation.** Batch listener with one ordered lock set per batch, in-memory application against the locked snapshot, dedup inside and across batches, and per-record fallback for poison messages, never dead-lettering a whole batch.
+- **Effort / risk.** M / High. This is the most delicate change: it must keep idempotency, sequence ordering and the balance invariant. It is covered by dedicated tests (duplicates, reordering, opposite transfers, a poison record, a database outage).
+
+### F-06 Missing indexes
+
+- **Evidence.** Query plans captured after the steady runs:
+
+{{table.explain}}
+
+- **Impact.** The cost of both queries grows with table size, so the baseline degrades as a run (or a day) accumulates rows; the plans above were captured at different table sizes and show the mechanism, not a like-for-like timing.
+- **Recommendation.** A unique index on the client and idempotency key, and an index on posting account and creation time. (The payment identifier is already a deterministic primary key; the cost removed is the scan of the key lookup.)
+- **Effort / risk.** S / Low.
+
+### F-07 Gateway waits for the broker inside a transaction; pools left at defaults
+
+- **Evidence.** The baseline gateway holds a pooled connection, an advisory lock and the debtor's sequence row lock across the broker round trip, and all pools use the driver default. `OutboxTest` shows the contract difference: with the broker down the baseline answers 503 and stores nothing, while the tuned gateway accepts the payment and publishes it later.
+- **Impact.** Under load, request threads queue for connections that are held during network waits.
+- **Recommendation.** Write the payment and an outbox row in one short transaction and publish after commit; size the pools for the database (gateway {{cfg.tuned_pool_gateway}}, validation {{cfg.tuned_pool_validation}}, ledger {{cfg.tuned_pool_ledger}} here). Those pool sizes are unswept lab choices, not recommendations.
+- **Effort / risk.** M / Medium. Clients must accept that a payment can be accepted while the broker is unavailable; load shedding on outbox backlog is recommended and was not implemented.
+
+### F-08 Lazy per-account limit queries (N+1)
+
+- **Evidence.** The baseline loads each account and then its limits with a separate query, including for the creditor whose limits are unused. `ReferenceDataAccessTest` asserts at least two limit-table scans per validation in the baseline and at most one when tuned (a property assertion, not a benchmark figure).
+- **Impact.** Extra queries per payment; small on its own once F-13 or a cache is in place.
+- **Recommendation.** One projection query joining accounts and their limit, an index on the limit table, and a short-lived in-process cache for the small, rarely changing rate table.
+- **Effort / risk.** S / Low.
+
+### F-12 Records keyed by merchant on few partitions
+
+- **Evidence.** Baseline keys every record by merchant on the partition counts in section 3; the tuned profile keys by debtor account, with the counts of both profiles below. `PartitioningTest` checks keys and counts in both profiles. The load profile sends half of its traffic through one merchant.
+
+{{table.partitions}}
+
+- **Impact.** A large merchant concentrates work on one partition and therefore one consumer thread; too few partitions also cap useful concurrency (F-03). Whether a hot partition limited the baseline was not measured (no per-partition lag was captured).
+- **Recommendation.** Key by debtor account and size partitions from measured per-partition throughput against the target rate; partitions can be added later but never removed, so plan the migration. Per-debtor ordering does not depend on the key (sequence numbers), which is what makes the change safe.
+- **Effort / risk.** M / Medium. A single very busy debtor becomes a hot partition.
+
+### F-13 Account data read from Postgres on every validation
+
+- **Evidence.** The baseline reads status, limits and ownership from Postgres for every payment. The tuned profile serves them from a Redis cache with versioned invalidation events, a time-to-live of {{cfg.cache_ttl_seconds}} s as a backstop, single-flight loading and fail-open behaviour; `CacheTest` covers invalidation, the stale-reader race, stampede protection and a Redis outage. The cache hit ratio was **not** captured in the benchmark runs.
+- **Impact.** Assessed moderate and only after F-06 and F-08 have removed the cheap wins; there is no measurement of its share of the combined result.
+- **Recommendation.** Defer until the effect of the cheaper changes is measured and a hit ratio can be observed. The trade-off is staleness: a blocked account can still be approved until its cached copy is invalidated or expires. Any adoption needs an explicit staleness tolerance from the business.
+- **Effort / risk.** L / High.
+
+## 6. Architecture observations
+
+These are separate from the performance findings: they concern how the system is put together, and would matter even at low load.
+
+- **Service boundaries.** The split into gateway, validation and ledger follows ownership of data well: the gateway owns payment status, validation owns reference data, the ledger owns balances and postings, with one Postgres schema each. Account attributes (currency, owner) exist in both the validation and the ledger schemas with no synchronisation mechanism; in the lab both are seeded, in production they would drift.
+- **Synchronous coupling.** In the baseline the availability of `POST /payments` depends on the broker, because the gateway publishes inside its request. The outbox removes that dependency at the cost of accepting payments while the pipeline is stalled; the client contract and the alerting need to reflect that.
+- **Retry and dead-letter strategy.** Consumers retry a bounded number of times and then dead-letter. A dead-lettered payment leaves a gap in its debtor's sequence, and every later payment for that debtor waits behind the gap. There is no re-drive tooling and nothing consumes or alerts on the dead-letter topics. The tuned batch consumer retries transient database errors without limit and only dead-letters a record that fails on its own. Recommendation: monitor the dead-letter topics, provide a re-drive path, and define how a sequence gap is repaired.
+- **Schema evolution.** Events carry a schema version and consumers ignore unknown fields, which tolerates additive change. There is no schema registry and no compatibility check, so a renamed or removed field breaks consumers at runtime. Recommendation: a registry or consumer-driven contract tests before the first breaking change.
+- **Delivery semantics.** Delivery is at-least-once everywhere; correctness comes from deterministic identifiers, the ledger's dedup record and monotonic status updates. This is sound and well tested, but it means the service counters count attempts, so they must not be used for business reporting (ADR-0003).
+- **Tenancy and access.** The client identity is a trusted request header, and the tuned profile adds a token-protected administration endpoint on the service port. Both are lab conveniences, not designs to copy.
+- **Availability.** A single broker with replication factor one and a single database instance are lab limits; nothing here says how the pipeline behaves when either fails over.
+
+## 7. Prioritised remediation roadmap
+
+Impact is assessed (one to five) and effort is S, M or L; quadrants use an impact of four or more as high and effort S as small. Where the score and the recommended order disagree (F-03 scores as a quick win but only pays off after F-12 and F-07), the sequenced plan follows the dependency.
+
+{{block.matrix}}
+
+{{table.findings}}
+
+**Sequenced plan.** The order respects dependencies: partitions before consumer threads, indexes before the outbox that relies on them, the outbox before asynchronous publishing, the projection query before the cache.
+
+{{table.plan}}
+
+## 8. Tuned results against baseline
+
+**Steady.** The same offered rates against both profiles:
+
+{{table.steady_comparison}}
+
+**Spike.**
+
+{{table.spike_comparison}}
+
+**Smoke** (ten virtual users, correctness check):
+
+{{table.smoke}}
+
+**Reading these tables.**
+- The tuned profile has a higher median end-to-end latency than the baseline at low load. The likely causes are the outbox polling on the gateway and the ledger and producer lingering, but that was not verified. It is a real trade-off: lower load, higher floor.
+- Higher steps in the baseline column are dominated by queueing; the numbers there describe an overloaded pipeline, not its service time. Baseline steps are also not independent, because its cost grows as the tables fill during a run.
+- Additional tuned runs with higher step lists, kept as recorded:
+
+{{table.extra_runs}}
+
+## 9. Limits of this evidence
+
+- One machine, one run per data point, load generator and services sharing the host. Differences at the level of a step are meaningful; small differences are not.
+- The limits are known only to step resolution, so any ratio is a range. The offered rate at which dropped iterations appear reflects latency backing up into the load generator; host contention may contribute and was not isolated.
+- Only the combination of all eight changes was measured. The per-finding impact in section 7 is an informed assessment. An ablation (tuned with one change reverted) is the way to measure each one and is recommended before investing in the larger items.
+- No consumer lag, CPU, garbage-collection or lock-wait data was captured, so which stage limits either profile is not established. The dashboard exists (`grafana/dashboards`) but no snapshots were stored with the results.
+- An earlier recording of the baseline spike scenario, made before three baseline-affecting fixes, did recover within the window; the current one did not. The difference was not attributed to a cause and may be run-to-run variance.
+- The query plans were captured after the runs at different table sizes.
+- Duplicate replays create no payment, so payment counts are roughly ninety percent of request counts.
+
+## Appendix A. Tuned configuration (verbatim from the run's environment record)
+
+{{block.tuned_config}}
+
+## Appendix B. Raw data
+
+{{table.results_index}}
+
+## Appendix C. How this report was produced
+
+`scripts/run-benchmark.sh` produced each result folder; `scripts/collect_results.py` derived `result.json`; `scripts/generate_report.py` filled this document from those files and the service configuration. `scripts/lint_report_numbers.py` rejects any number in the template prose that is not a generated placeholder, and CI fails if this file differs from a fresh generation.
