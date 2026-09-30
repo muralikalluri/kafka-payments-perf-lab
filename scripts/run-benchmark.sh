@@ -5,6 +5,12 @@
 # RECOVER_SECONDS (spike). They are recorded in result.json.
 set -euo pipefail
 
+# A machine that sleeps mid-run produces invalid timings (and can stall the run), so hold a
+# sleep assertion on macOS for the duration of the benchmark.
+if [ "$(uname)" = Darwin ] && [ -z "${BENCH_CAFFEINATED:-}" ] && command -v caffeinate >/dev/null; then
+  BENCH_CAFFEINATED=1 exec caffeinate -dimsu "$0" "$@"
+fi
+
 usage() { echo "usage: $0 <baseline|tuned> <smoke|steady|spike>" >&2; exit 2; }
 PROFILE="${1:-}"; SCENARIO="${2:-}"
 case "$PROFILE" in baseline|tuned) ;; *) usage ;; esac
