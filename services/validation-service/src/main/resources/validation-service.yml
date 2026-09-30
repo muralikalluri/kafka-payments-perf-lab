@@ -1,6 +1,7 @@
 lab:
   tuning:
     f08: false   # F-08: projection query + Caffeine (baseline: JPA lazy loading, N+1)
+    f13: false   # F-13: Redis cache-aside, account.updated invalidation, single-flight (baseline: Postgres every time)
     f12: false   # F-12: record key = debtor account id (baseline: merchant id)
 spring:
   application:
@@ -43,6 +44,9 @@ management:
     web:
       exposure:
         include: health,info,prometheus
+  health:
+    redis:
+      enabled: false   # baseline has no Redis dependency; tuned re-enables it
   metrics:
     tags:
       application: ${spring.application.name}

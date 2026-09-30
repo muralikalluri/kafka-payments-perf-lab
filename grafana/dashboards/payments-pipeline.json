@@ -635,6 +635,73 @@
           "mode": "multi"
         }
       }
+    },
+    {
+      "id": 11,
+      "title": "Validation account-cache hit ratio (tuned, F-13)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 40,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "legendFormat": "hit ratio",
+          "expr": "sum(rate(cache_gets_total{result=\"hit\"}[1m])) / clamp_min(sum(rate(cache_gets_total{result=~\"hit|miss\"}[1m])), 1e-9)"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "legendFormat": "loads from Postgres/s",
+          "expr": "sum(rate(cache_loads_total[1m]))"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "legendFormat": "redis errors/s",
+          "expr": "sum(rate(cache_gets_total{result=\"error\"}[1m]))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 8
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
     }
   ],
   "templating": {

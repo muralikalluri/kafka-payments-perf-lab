@@ -9,8 +9,9 @@ import lab.payments.common.Ids;
 import lab.payments.common.PaymentInitiated;
 import lab.payments.common.PaymentValidated;
 import lab.payments.common.PaymentValidated.Outcome;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
 class ValidationService {
@@ -18,9 +19,18 @@ class ValidationService {
     static final String SANCTIONED_PREFIX = "SANC-";
 
     private final ReferenceData reference;
+    private final TransactionTemplate tx;
+    private final boolean wrapInTransaction;
 
-    ValidationService(ReferenceData reference) {
+    ValidationService(ReferenceData reference, TransactionTemplate tx,
+            @Value("${lab.tuning.f08:false}") boolean tuned) {
         this.reference = reference;
+        this.tx = tx;
+        // Baseline: one read-only transaction around the whole validation (the JPA implementation needs it
+        // for lazy loading). Tuned reference data uses plain JDBC and, with the Redis cache in front, most
+        // validations touch no database at all, so holding a pooled connection for the whole call would
+        // defeat the pool sizing.
+        this.wrapInTransaction = !tuned;
     }
 
     /**
@@ -28,9 +38,8 @@ class ValidationService {
      * sequence has no gaps downstream. Where reference data comes from is the ReferenceData
      * implementation's business: the baseline one carries the F-08 / F-13 anti-patterns.
      */
-    @Transactional(readOnly = true)
     PaymentValidated validate(PaymentInitiated e) {
-        String reason = reject(e);
+        String reason = wrapInTransaction ? tx.execute(status -> reject(e)) : reject(e);
         return new PaymentValidated(PaymentValidated.SCHEMA_VERSION,
                 Ids.eventId(e.paymentId(), "validated"), e.eventId(), e.paymentId(), e.clientId(),
                 reason == null ? Outcome.VALID : Outcome.REJECTED, reason,

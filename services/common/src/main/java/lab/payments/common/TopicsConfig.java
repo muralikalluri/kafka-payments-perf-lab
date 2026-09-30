@@ -17,6 +17,7 @@ public class TopicsConfig {
                 topic(Topics.INITIATED, partitions),
                 topic(Topics.VALIDATED, partitions),
                 topic(Topics.POSTED, partitions),
+                topic(Topics.ACCOUNT_UPDATED, partitions),
                 topic(Topics.INITIATED + ".DLT", partitions),
                 topic(Topics.VALIDATED + ".DLT", partitions));
     }

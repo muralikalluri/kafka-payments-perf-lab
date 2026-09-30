@@ -19,7 +19,7 @@ class ReferenceDataAccessTest {
     }
 
     @Test
-    void accountLimitsAreQueriedOncePerValidationWhenTuned() throws Exception {
+    void accountLimitsAreQueriedAtMostOncePerValidationWhenTuned() throws Exception {
         String debtor = Lab.account(CLIENT, 100_000);
         String creditor = Lab.account(CLIENT, 0);
         Thread.sleep(1500);
@@ -31,13 +31,15 @@ class ReferenceDataAccessTest {
         }
         Lab.await("payments terminal", () -> Lab.count(
                 "SELECT count(*) FROM gateway.payments WHERE debtor_account_id = ? AND status_rank = 3", debtor) == PAYMENTS);
-        long atLeast = Lab.tuned() ? PAYMENTS : 2L * PAYMENTS;
-        Lab.await("limits scan counter reflects at least " + atLeast, () -> limitsScans() - before >= atLeast);
+        if (!Lab.tuned()) {
+            Lab.await("limits scan counter reflects two scans per validation", () -> limitsScans() - before >= 2L * PAYMENTS);
+        }
         Thread.sleep(1500); // let any surplus scans show up before asserting an upper bound
         long delta = limitsScans() - before;
         if (Lab.tuned()) {
-            // One join per validation. Stats counters flush asynchronously and other tests may leave a few
-            // stray scans in the window, so allow some slack, but nowhere near two per validation.
+            // At most one join per validation (with the F-13 cache in front, far fewer). Stats counters flush
+            // asynchronously and other tests may leave a few stray scans in the window, so allow some slack,
+            // but nowhere near two per validation.
             assertThat(delta).isLessThan(Math.round(PAYMENTS * 1.5));
         } else {
             assertThat(delta).isGreaterThanOrEqualTo(2L * PAYMENTS); // lazy limits for debtor AND creditor

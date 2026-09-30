@@ -36,7 +36,7 @@ class JpaReferenceData implements ReferenceData {
                 long perTx = a.getLimits().stream()                       // F-08: lazy query per account
                         .filter(l -> "PER_TX".equals(l.getLimitType()))
                         .mapToLong(AccountLimit::getAmountUsdMinor).min().orElse(Long.MAX_VALUE);
-                result.put(id, new AccountSnapshot(a.getId(), a.getClientId(), a.getCurrency(), a.getStatus(), perTx));
+                result.put(id, new AccountSnapshot(a.getId(), a.getClientId(), a.getCurrency(), a.getStatus(), perTx, 0));
             });
         }
         return result;

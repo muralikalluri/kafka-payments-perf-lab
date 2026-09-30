@@ -33,6 +33,8 @@ final class Lab {
 
     static final String PROFILE = System.getProperty("lab.profile", "baseline");
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16");
+    static final org.testcontainers.containers.GenericContainer<?> REDIS =
+            new org.testcontainers.containers.GenericContainer<>("redis:7").withExposedPorts(6379);
     static final KafkaContainer KAFKA = new KafkaContainer("apache/kafka:3.8.0");
     static final JdbcTemplate JDBC;
     static final ConfigurableApplicationContext GATEWAY;
@@ -46,6 +48,9 @@ final class Lab {
     static {
         POSTGRES.start();
         KAFKA.start();
+        if ("tuned".equals(PROFILE)) {
+            REDIS.start();
+        }
         System.setProperty("LAB_PROFILE", PROFILE);
         GATEWAY = start(PaymentGatewayApplication.class,
                 PaymentGatewayApplication.CONFIG_NAME);
@@ -73,12 +78,17 @@ final class Lab {
     }
 
     private static ConfigurableApplicationContext start(Class<?> app, String configName) {
-        return new SpringApplicationBuilder(app).properties(configName).run(
+        List<String> args = new java.util.ArrayList<>(List.of(
                 "--server.port=0",
                 "--spring.datasource.url=" + POSTGRES.getJdbcUrl(),
                 "--spring.datasource.username=" + POSTGRES.getUsername(),
                 "--spring.datasource.password=" + POSTGRES.getPassword(),
-                "--spring.kafka.bootstrap-servers=" + KAFKA.getBootstrapServers());
+                "--spring.kafka.bootstrap-servers=" + KAFKA.getBootstrapServers()));
+        if (REDIS.isRunning()) {
+            args.add("--spring.data.redis.host=" + REDIS.getHost());
+            args.add("--spring.data.redis.port=" + REDIS.getMappedPort(6379));
+        }
+        return new SpringApplicationBuilder(app).properties(configName).run(args.toArray(new String[0]));
     }
 
     /** Seeds an account in both the validation and ledger schemas. Returns its id. */
@@ -163,6 +173,31 @@ final class Lab {
 
     static void unpausePostgres() {
         POSTGRES.getDockerClient().unpauseContainerCmd(POSTGRES.getContainerId()).exec();
+    }
+
+    static void pauseRedis() {
+        REDIS.getDockerClient().pauseContainerCmd(REDIS.getContainerId()).exec();
+    }
+
+    static void unpauseRedis() {
+        REDIS.getDockerClient().unpauseContainerCmd(REDIS.getContainerId()).exec();
+    }
+
+    /** Waits until validation's per-instance cache-invalidation consumer group has an assigned member. */
+    static void awaitInvalidationConsumer() {
+        await("account.updated consumer assigned", () -> {
+            try (Admin admin = Admin.create(Map.<String, Object>of("bootstrap.servers", KAFKA.getBootstrapServers()))) {
+                for (var group : admin.listConsumerGroups().all().get()) {
+                    if (group.groupId().startsWith("validation-cache-")) {
+                        return !admin.describeConsumerGroups(List.of(group.groupId())).all().get()
+                                .get(group.groupId()).members().isEmpty();
+                    }
+                }
+                return false;
+            } catch (Exception e) {
+                return false;
+            }
+        });
     }
 
     static void pauseKafka() {
