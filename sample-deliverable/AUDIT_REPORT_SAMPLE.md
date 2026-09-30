@@ -190,7 +190,7 @@ These are separate from the performance findings: they concern how the system is
 - **Schema evolution.** Events carry a schema version and consumers ignore unknown fields, which tolerates additive change. There is no schema registry and no compatibility check, so a renamed or removed field breaks consumers at runtime. Recommendation: a registry or consumer-driven contract tests before the first breaking change.
 - **Delivery semantics.** Delivery is at-least-once everywhere; correctness comes from deterministic identifiers, the ledger's dedup record and monotonic status updates. This is sound and well tested, but it means the service counters count attempts, so they must not be used for business reporting (ADR-0003).
 - **Tenancy and access.** The client identity is a trusted request header, and the tuned profile adds a token-protected administration endpoint on the service port. Both are lab conveniences, not designs to copy.
-- **Availability.** A single broker with replication factor one and a single database instance are lab limits; nothing here says how the pipeline behaves when either fails over.
+- **Availability.** The recorded runs used a single Kafka broker with replication factor 1 and a single database instance; the database is a lab limit and its failover was not tested. Broker-failure behaviour was not tested in the recorded runs.
 
 ## 7. Prioritised remediation roadmap
 
@@ -307,6 +307,10 @@ quadrantChart
 | `2026-09-30_tuned_steady_extended` | no | 800 | 800 | 53 ms | 126 ms | 311 ms | 0 | yes |
 | `2026-09-30_tuned_steady_extended` | no | 1200 | 1200 | 126 ms | 835 ms | 33.2 s | 0 | no |
 | `2026-09-30_tuned_steady_extended` | no | 1600 | 1481 | 1.7 s | 34.1 s | 59.3 s | 7120 | no |
+
+**Broker failure tests**
+
+_(no broker-failure runs are recorded)_
 
 ## 9. Limits of this evidence
 

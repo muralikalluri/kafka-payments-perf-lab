@@ -1,4 +1,6 @@
 lab:
+  topics:
+    replicas: ${LAB_TOPIC_REPLICAS:1}   # 1 for the single-broker tests; the benchmark runner sets 3 for the compose cluster
   tuning:
     f01: false   # F-01: async producer sends with callbacks (baseline: synchronous send().get())
     f04: false   # F-04: batch listener + JDBC batch writes (baseline: one record, one transaction)

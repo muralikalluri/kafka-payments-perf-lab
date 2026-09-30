@@ -1,9 +1,15 @@
 # Fixed CPU/memory limits so benchmark runs are reproducible.
 # Usage: docker compose -f docker-compose.yml -f docker-compose.resources.yml up -d
 services:
-  kafka:
-    cpus: 2.0
-    mem_limit: 2g
+  kafka-1:
+    cpus: 1.0
+    mem_limit: 1g
+  kafka-2:
+    cpus: 1.0
+    mem_limit: 1g
+  kafka-3:
+    cpus: 1.0
+    mem_limit: 1g
   postgres:
     cpus: 2.0
     mem_limit: 2g

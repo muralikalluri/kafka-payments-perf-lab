@@ -71,7 +71,7 @@ Results land in `results/<date>_<profile>_<scenario>/` (`result.json`, `summary.
 
 ## Features
 
-- {{fact.service_count}} services (gateway, validation, ledger) with the notification service stubbed, on a single Kafka broker in KRaft mode, Postgres with Flyway, and Redis for the tuned cache.
+- {{fact.service_count}} services (gateway, validation, ledger) with the notification service stubbed, on {{fact.kafka_topology}} in KRaft mode, Postgres with Flyway, and Redis for the tuned cache.
 - Profiles: `baseline` carries common real-world anti-patterns on purpose; `tuned` fixes each numbered finding behind its own flag, one commit per finding.
 - Load scenarios in k6 (smoke, steady stepped arrival rate, spike) and a runner that resets the stack, records the environment, checks the ledger invariants and derives every figure from the database and k6 output.
 - Micrometer metrics, Prometheus, Kafka and Postgres exporters and one provisioned Grafana dashboard.

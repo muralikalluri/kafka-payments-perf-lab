@@ -30,6 +30,7 @@ class Run:
     limits: list = field(default_factory=list)
     topics: dict = field(default_factory=dict)
     tuned_config: str = ""
+    topic_details: dict = field(default_factory=dict)
     explain: str | None = None
 
     @property
@@ -39,6 +40,7 @@ class Run:
 
 def _parse_env(text: str):
     env, limits, topics, tuned, mode = {}, [], {}, [], None
+    details = {}
     for line in text.splitlines():
         if line.startswith("tuned_config:"):
             mode = "tuned"
@@ -50,16 +52,19 @@ def _parse_env(text: str):
             tuned.append(line)
             continue
         if mode == "topics":
-            m = re.search(r"Topic: (\S+).*PartitionCount: (\d+)", line)
+            m = re.search(r"Topic: (\S+).*PartitionCount: (\d+)\s+ReplicationFactor: (\d+)(?:\s+Configs: (.*))?", line)
             if m:
                 topics[m.group(1)] = int(m.group(2))
+                isr = re.search(r"min\.insync\.replicas=(\d+)", m.group(4) or "")
+                details[m.group(1)] = {"partitions": int(m.group(2)), "replication": int(m.group(3)),
+                                       "min_isr": int(isr.group(1)) if isr else None}
             continue
         if line.startswith("limit "):
             limits.append(line[len("limit "):])
         elif "=" in line:
             k, v = line.split("=", 1)
             env[k] = v
-    return env, limits, topics, "\n".join(tuned)
+    return env, limits, topics, "\n".join(tuned), details
 
 
 def load_runs(results_dir: str | None = None) -> dict:
@@ -74,12 +79,13 @@ def load_runs(results_dir: str | None = None) -> dict:
         with open(os.path.join(path, "result.json")) as fh:
             result = json.load(fh)
         with open(os.path.join(path, "env.txt")) as fh:
-            env, limits, topics, tuned = _parse_env(fh.read())
+            env, limits, topics, tuned, details = _parse_env(fh.read())
         explain = None
         if os.path.exists(os.path.join(path, "explain.txt")):
             with open(os.path.join(path, "explain.txt")) as fh:
                 explain = fh.read()
-        runs[key] = Run(key, path, date, profile, scenario, suffix, result, env, limits, topics, tuned, explain)
+        runs[key] = Run(key, path, date, profile, scenario, suffix, result, env, limits, topics, tuned,
+                        explain=explain, topic_details=details)
     return runs
 
 
@@ -109,6 +115,8 @@ def run_label(run: Run) -> str:
     label = f"`{os.path.basename(run.dir)}`"
     if run.suffix == "recorded":
         label += " (recorded during the dashboard capture)"
+    if is_failover(run):
+        label += " (brokers stopped during the load)"
     return label
 
 
@@ -131,6 +139,15 @@ def tuned_blocks(run: Run) -> dict:
 
 # --------------------------------------------------------------------- facts
 
+def is_failover(run: Run) -> bool:
+    return bool(run.suffix) and run.suffix.startswith("failover")
+
+
+def is_ladder(run: Run) -> bool:
+    """A steady run that climbs a ladder of offered rates (standard or extended), not a fault-injection run."""
+    return run.scenario == "steady" and not is_failover(run)
+
+
 def pass_through(run: Run):
     """(highest offered rate up to which every step met the SLO, first rate that did not) for one run."""
     passed, failed = None, None
@@ -150,7 +167,7 @@ def steady_bounds(runs: dict, profile: str):
         return None, None
     fails = []
     for key, run in runs.items():
-        if run.profile == profile and run.scenario == "steady":
+        if run.profile == profile and is_ladder(run):
             fails += [p["target_req_per_s"] for p in run.phases
                       if not p["meets_slo"] and p["target_req_per_s"] > passed]
     return passed, (min(fails) if fails else None)
@@ -162,7 +179,7 @@ def steady_fail_source(runs: dict, profile: str):
     if failed is None:
         return None
     for run in runs.values():
-        if run.profile == profile and run.scenario == "steady":
+        if run.profile == profile and is_ladder(run):
             for p in run.phases:
                 if p["target_req_per_s"] == failed and not p["meets_slo"]:
                     return os.path.basename(run.dir)
@@ -172,10 +189,10 @@ def steady_fail_source(runs: dict, profile: str):
 def cold_first_step_note(runs: dict) -> str:
     """Sentence about first steps that missed the SLO although the same rate passed when reached later."""
     passing = {(r.profile, p["target_req_per_s"]) for r in runs.values()
-               if r.scenario == "steady" for i, p in enumerate(r.phases) if i > 0 and p["meets_slo"]}
+               if is_ladder(r) for i, p in enumerate(r.phases) if i > 0 and p["meets_slo"]}
     notes = []
     for r in runs.values():
-        if r.scenario != "steady" or not r.phases:
+        if not is_ladder(r) or not r.phases:
             continue
         first = r.phases[0]
         if not first["meets_slo"] and (r.profile, first["target_req_per_s"]) in passing:
@@ -277,7 +294,7 @@ def smoke_comparison(runs: dict) -> str:
 
 def extra_runs_table(runs: dict) -> str:
     rows = []
-    for key in sorted(k for k, r in runs.items() if r.scenario == "steady" and r.suffix):
+    for key in sorted(k for k, r in runs.items() if is_ladder(r) and r.suffix):
         r = runs[key]
         for i, p in enumerate(r.phases):
             rows.append([f"`{os.path.basename(r.dir)}`", "yes" if i == 0 else "no", rate(p["target_req_per_s"]),
@@ -383,3 +400,36 @@ def adr_table() -> str:
         name = os.path.basename(path)
         rows.append([f"[{title.split(':')[0]}](docs/adr/{name})", title.split(":", 1)[1].strip() if ":" in title else title])
     return table(["ADR", "Decision"], rows)
+
+
+def kafka_topology(runs: dict) -> str:
+    """The broker layout the recorded runs actually used, from each run's env.txt."""
+    seen = set()
+    for r in runs.values():
+        brokers = int(r.env.get("kafka_brokers", "1"))
+        rf = max((d["replication"] for d in r.topic_details.values()), default=1)
+        isr = next((d["min_isr"] for d in r.topic_details.values() if d.get("min_isr")), None)
+        seen.add((brokers, rf, isr))
+    if len(seen) != 1:
+        return "Kafka with differing broker layouts across the recorded runs (see each run's env.txt)"
+    brokers, rf, isr = seen.pop()
+    if brokers == 1:
+        return "a single Kafka broker with replication factor " + str(rf)
+    return (f"a {brokers}-broker Kafka cluster with replication factor {rf}"
+            + (f" and min.insync.replicas {isr}" if isr else ""))
+
+
+def failover_table(runs: dict) -> str:
+    rows = []
+    for key in sorted(k for k, r in runs.items() if is_failover(r)):
+        r = runs[key]
+        p = r.phases[0]
+        mode = "two brokers" if r.suffix.endswith("two") else "one broker"
+        i = r.result["invariants"]
+        rows.append([r.profile, mode, rate(p["target_req_per_s"]), f"{r.result['k6']['http_req_failed_rate'] * 100:.2f}%",
+                     ms(p["e2e_ms"]["p50"]), ms(p["e2e_ms"]["p99"]), p["dropped_iterations"],
+                     yes_no(i["all_hold"]), i["sequence_conflicts"]])
+    if not rows:
+        return "_(no broker-failure runs are recorded)_"
+    return table(["Profile", "Stopped", "Offered (req/s)", "HTTP error rate", "End-to-end p50", "End-to-end p99",
+                  "Dropped iterations", "Invariants hold", "Sequence conflicts"], rows)

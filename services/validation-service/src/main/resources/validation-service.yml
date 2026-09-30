@@ -1,4 +1,6 @@
 lab:
+  topics:
+    replicas: ${LAB_TOPIC_REPLICAS:1}   # 1 for the single-broker tests; the benchmark runner sets 3 for the compose cluster
   tuning:
     f08: false   # F-08: projection query + Caffeine (baseline: JPA lazy loading, N+1)
     f13: false   # F-13: Redis cache-aside, account.updated invalidation, single-flight (baseline: Postgres every time)

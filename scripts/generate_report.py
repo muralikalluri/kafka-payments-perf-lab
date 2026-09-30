@@ -471,6 +471,23 @@ def extended_scope_table(runs: dict) -> str:
                    [[i, "done" if ok else "not built", ev] for i, ok, ev in rows])
 
 
+def failover_note(runs: dict) -> str:
+    fo = [r for r in runs.values() if L.is_failover(r)]
+    if not fo:
+        return "Broker-failure behaviour was not tested in the recorded runs."
+    tuned = [r for r in fo if r.profile == "tuned"]
+    baseline = [r for r in fo if r.profile == "baseline"]
+    ok = all(r.result["invariants"]["all_hold"] for r in fo)
+    text = ("Brokers were stopped under load and restarted in " + str(len(fo)) + " recorded runs; "
+            + ("the ledger invariants held in all of them." if ok else "the ledger invariants FAILED in at least one of them."))
+    if tuned and baseline:
+        t_fail = max(r.result["k6"]["http_req_failed_rate"] for r in tuned)
+        b_fail = max(r.result["k6"]["http_req_failed_rate"] for r in baseline)
+        if t_fail == 0 and b_fail > 0:
+            text += " The baseline gateway rejected requests while the broker was unavailable; the tuned gateway kept accepting them."
+    return text
+
+
 def known_gaps_sentence(runs: dict) -> str:
     """Known gaps, each included only while it is still true in the repository or the results."""
     gaps = []
@@ -585,6 +602,9 @@ def build_values(runs: dict) -> dict:
         "table.headline": headline_table(runs, b_pass, b_fail, t_pass, t_fail, fail_source),
         "table.adrs": L.adr_table(),
         "table.mvp_status": mvp_status_table(runs),
+        "fact.kafka_topology": L.kafka_topology(runs),
+        "table.failover": L.failover_table(runs),
+        "fact.failover_note": failover_note(runs),
         "table.extended_scope": extended_scope_table(runs),
         "fact.not_built": not_built_sentence(runs),
         "fact.known_gaps": known_gaps_sentence(runs),

@@ -195,6 +195,31 @@ class FactsTest(unittest.TestCase):
         self.assertEqual(G.score_order_note(agreed), "")
 
 
+class FailoverIsolationTest(unittest.TestCase):
+    def test_failover_runs_do_not_affect_ladder_facts(self):
+        runs = L.load_runs()
+        before = (L.steady_bounds(runs, "tuned"), L.cold_first_step_note(runs))
+        fake = copy.deepcopy(runs["tuned_steady"])
+        fake.suffix = "failover-one"
+        fake.key = "tuned_steady_failover-one"
+        for phase in fake.phases:
+            phase["meets_slo"] = False
+        runs["tuned_steady_failover-one"] = fake
+        self.assertEqual((L.steady_bounds(runs, "tuned"), L.cold_first_step_note(runs)), before)
+        self.assertIn("brokers stopped", L.run_label(fake))
+        self.assertIn("one broker", L.failover_table(runs))
+
+    def test_topology_sentence_follows_the_runs(self):
+        runs = L.load_runs()
+        self.assertIn("Kafka", L.kafka_topology(runs))
+        clustered = copy.deepcopy(runs)
+        for r in clustered.values():
+            r.env["kafka_brokers"] = "3"
+            r.topic_details = {"payments.initiated": {"partitions": 12, "replication": 3, "min_isr": 2}}
+        self.assertIn("3-broker", L.kafka_topology(clustered))
+        self.assertIn("min.insync.replicas 2", L.kafka_topology(clustered))
+
+
 class RoadmapTest(unittest.TestCase):
     def setUp(self):
         self.fs = G.findings()

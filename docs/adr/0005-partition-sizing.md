@@ -18,7 +18,8 @@ same partition number as the original, so the DLT needs at least as many partiti
   the max sustainable rate; the per-partition consumer throughput is derived from those runs when the
   report is written. This document deliberately carries no figures so they cannot drift from the
   measurements.
-- **Limits of the lab.** A single broker with replication factor 1 is a lab limitation. Partitions
+- **Limits of the lab.** The lab runs a small cluster on one machine, so broker-level effects such as network
+  replication cost are only approximated. Partitions
   can be increased later but never decreased, so a profile switch needs the topics recreated
   (run-benchmark.sh resets the stack before every run).
 - **Trade-off.** One very busy debtor becomes a hot partition in tuned. The load scenarios spread

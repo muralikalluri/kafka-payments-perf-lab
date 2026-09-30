@@ -83,7 +83,7 @@ Results land in `results/<date>_<profile>_<scenario>/` (`result.json`, `summary.
 
 ## Features
 
-- 3 services (gateway, validation, ledger) with the notification service stubbed, on a single Kafka broker in KRaft mode, Postgres with Flyway, and Redis for the tuned cache.
+- 3 services (gateway, validation, ledger) with the notification service stubbed, on a single Kafka broker with replication factor 1 in KRaft mode, Postgres with Flyway, and Redis for the tuned cache.
 - Profiles: `baseline` carries common real-world anti-patterns on purpose; `tuned` fixes each numbered finding behind its own flag, one commit per finding.
 - Load scenarios in k6 (smoke, steady stepped arrival rate, spike) and a runner that resets the stack, records the environment, checks the ledger invariants and derives every figure from the database and k6 output.
 - Micrometer metrics, Prometheus, Kafka and Postgres exporters and one provisioned Grafana dashboard.
@@ -128,7 +128,7 @@ Built to the MVP cut in [SPEC.md](SPEC.md) first, then the items SPEC marks Late
 | F-09 serialization and INFO logging | not built | lab.tuning.f09 |
 | F-10 JVM sizing, GC choice and virtual threads | not built | lab.tuning.f10 |
 | F-11 hot settlement account | not built | lab.tuning.f11 |
-| Three-broker Kafka cluster | not built | docker-compose.yml |
+| Three-broker Kafka cluster | done | docker-compose.yml |
 | Soak scenario | not built | load/k6/soak.js |
 | Gatling scenarios | not built | load/gatling/ |
 | Distributed tracing to Jaeger | not built | docker-compose.yml |
@@ -136,7 +136,7 @@ Built to the MVP cut in [SPEC.md](SPEC.md) first, then the items SPEC marks Late
 | PDF export of the reports | not built | scripts/export_pdf.js |
 | Reusable report template folder | not built | report/template/ |
 
-Not built (marked Later in SPEC.md): F-02 producer idempotence, acks and in-flight; F-05 blocking notification call replaced by a hand-off (notification-service); F-09 serialization and INFO logging; F-10 JVM sizing, GC choice and virtual threads; F-11 hot settlement account; Three-broker Kafka cluster; Soak scenario; Gatling scenarios; Distributed tracing to Jaeger; JFR recordings and flame graphs; PDF export of the reports; Reusable report template folder.
+Not built (marked Later in SPEC.md): F-02 producer idempotence, acks and in-flight; F-05 blocking notification call replaced by a hand-off (notification-service); F-09 serialization and INFO logging; F-10 JVM sizing, GC choice and virtual threads; F-11 hot settlement account; Soak scenario; Gatling scenarios; Distributed tracing to Jaeger; JFR recordings and flame graphs; PDF export of the reports; Reusable report template folder.
 
 Known gaps in what was built: no load shedding on the gateway outbox backlog; some results predate the per-stage metric snapshots (consumer lag, CPU, garbage collection, connection pools, locks), so those runs have none stored; FX rates are cached in process rather than in Redis; connection-pool sizes are unswept lab choices; the cache accepts bounded staleness (a blocked account can be approved until its cached copy is invalidated or expires).
 

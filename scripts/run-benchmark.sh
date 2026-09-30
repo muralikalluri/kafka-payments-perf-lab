@@ -3,6 +3,7 @@
 # Usage: ./scripts/run-benchmark.sh <baseline|tuned> <smoke|steady|spike>
 # Scenario knobs (env): STEPS, STEP_SECONDS (steady); BASE_RATE, WARM_SECONDS, BURST_SECONDS,
 # RECOVER_SECONDS (spike). They are recorded in result.json. RUN_SUFFIX appends to the results folder name.
+# BENCH_CHAOS_CMD is an optional shell command run in the background during the load (fault injection).
 set -euo pipefail
 
 # A machine that sleeps mid-run produces invalid timings (and can stall the run), so hold a
@@ -55,6 +56,7 @@ $COMPOSE up -d --wait --wait-timeout 240 >/dev/null
 
 echo "==> start services (profile: $PROFILE)"
 for s in $SERVICES; do
+  LAB_TOPIC_REPLICAS="${LAB_TOPIC_REPLICAS:-3}" KAFKA_BOOTSTRAP="${KAFKA_BOOTSTRAP:-localhost:9092,localhost:9094,localhost:9096}" \
   LAB_PROFILE="$PROFILE" nohup java -jar "services/$s/target/$s-0.1.0-SNAPSHOT-exec.jar" \
     > "$RUN_DIR/raw/$s.log" 2>&1 &
   PIDS="$PIDS $!"
@@ -84,6 +86,7 @@ echo "==> environment"
     echo "cpu_cores=$(nproc)"
     echo "ram_bytes=$(awk '/MemTotal/ {print $2*1024}' /proc/meminfo)"
   fi
+  echo "kafka_brokers=$($COMPOSE ps --services | grep -c '^kafka-[0-9]')"
   echo "docker_vm=$(docker info --format 'cpus={{.NCPU}} mem_bytes={{.MemTotal}}')"
   echo "java=$(java -version 2>&1 | head -1)"
   echo "k6=$(k6 version | head -1)"
@@ -100,7 +103,7 @@ echo "==> environment"
     done
   fi
   echo "topics:"
-  $COMPOSE exec -T kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --describe 2>/dev/null \
+  $COMPOSE exec -T kafka-1 /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:29092 --describe 2>/dev/null \
     | grep '^Topic:' | sed 's/^/  /' || true
 } > "$RUN_DIR/env.txt"
 
@@ -111,6 +114,11 @@ echo "==> k6 $SCENARIO"
 STATS_PID=$!
 PIDS="$PIDS $STATS_PID"
 METRICS_START="$(python3 -c 'import time; print(time.time())')"
+# Optional fault injection: BENCH_CHAOS_CMD runs in the background once the load starts (see scripts/failover-test.sh).
+if [ -n "${BENCH_CHAOS_CMD:-}" ]; then
+  ( bash -c "$BENCH_CHAOS_CMD" > "$RUN_DIR/raw/chaos.log" 2>&1 ) &
+  PIDS="$PIDS $!"
+fi
 set +e
 SUMMARY_PATH="$RUN_DIR/summary.json" k6 run --quiet "load/k6/$SCENARIO.js" 2>&1 | tee "$RUN_DIR/raw/k6.log"
 K6_EXIT=${PIPESTATUS[0]}
