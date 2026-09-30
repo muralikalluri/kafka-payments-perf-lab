@@ -1,5 +1,6 @@
 package lab.payments.ledgerservice;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Instant;
 import java.util.List;
 import lab.payments.common.Ids;
@@ -28,8 +29,12 @@ public class LedgerService {
 
     private final JdbcTemplate jdbc;
 
-    public LedgerService(JdbcTemplate jdbc) {
+    private final MeterRegistry meters;
+
+    public LedgerService(JdbcTemplate jdbc, MeterRegistry meters) {
         this.jdbc = jdbc;
+        this.meters = meters;
+        meters.counter("ledger.parked"); // export 0 from startup so dashboards show a series
     }
 
     private record Account(String id, String currency, boolean overdraft, long balance,
@@ -133,9 +138,12 @@ public class LedgerService {
     }
 
     private void park(PaymentValidated e) {
-        jdbc.update("""
+        int inserted = jdbc.update("""
                 INSERT INTO pending_payments(debtor_account_id, debtor_seq, payload) VALUES (?,?,?)
                 ON CONFLICT DO NOTHING""", e.debtorAccountId(), e.debtorSeq(), Json.write(e));
+        if (inserted > 0) {
+            meters.counter("ledger.parked").increment();
+        }
     }
 
     private void record(PaymentValidated e, PaymentPosted.Outcome outcome, String reason) {
@@ -149,6 +157,7 @@ public class LedgerService {
         // F-12: keyed by merchant id in baseline.
         jdbc.update("INSERT INTO outbox(msg_key, payload) VALUES (?,?)",
                 e.merchantId(), Json.write(posted));
+        meters.counter("ledger.applied", "outcome", outcome.name()).increment();
     }
 
     private boolean exists(PaymentValidated e) {

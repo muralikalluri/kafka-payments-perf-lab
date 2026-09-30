@@ -16,3 +16,9 @@ services:
   grafana:
     cpus: 0.5
     mem_limit: 512m
+  kafka-exporter:
+    cpus: 0.25
+    mem_limit: 128m
+  postgres-exporter:
+    cpus: 0.25
+    mem_limit: 128m

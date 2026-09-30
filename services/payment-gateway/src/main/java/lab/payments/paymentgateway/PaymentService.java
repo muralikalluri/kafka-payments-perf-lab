@@ -1,5 +1,7 @@
 package lab.payments.paymentgateway;
 
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -26,9 +28,14 @@ public class PaymentService {
     private final JdbcTemplate jdbc;
     private final KafkaTemplate<String, String> kafka;
 
-    public PaymentService(JdbcTemplate jdbc, KafkaTemplate<String, String> kafka) {
+    private final Counter accepted;
+    private final Counter replayed;
+
+    public PaymentService(JdbcTemplate jdbc, KafkaTemplate<String, String> kafka, MeterRegistry meters) {
         this.jdbc = jdbc;
         this.kafka = kafka;
+        this.accepted = meters.counter("payments.accepted");
+        this.replayed = meters.counter("payments.idempotent.replays");
     }
 
     /**
@@ -59,6 +66,7 @@ public class PaymentService {
             if (!Arrays.equals(existing.get().hash(), hash)) {
                 throw new Exceptions.IdempotencyKeyReusedException();
             }
+            replayed.increment();
             return Json.read(existing.get().responseBody(), PaymentAccepted.class);
         }
 
@@ -89,6 +97,7 @@ public class PaymentService {
         } catch (Exception e) {
             throw new Exceptions.BrokerUnavailableException(e);
         }
+        accepted.increment();
         return response;
     }
 

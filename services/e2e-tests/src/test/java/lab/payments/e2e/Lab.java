@@ -30,6 +30,8 @@ final class Lab {
     static final KafkaContainer KAFKA = new KafkaContainer("apache/kafka:3.8.0");
     static final JdbcTemplate JDBC;
     static final int GATEWAY_PORT;
+    static final int VALIDATION_PORT;
+    static final int LEDGER_PORT;
     private static final HttpClient HTTP = HttpClient.newHttpClient();
 
     static {
@@ -38,14 +40,27 @@ final class Lab {
         System.setProperty("LAB_PROFILE", PROFILE);
         ConfigurableApplicationContext gateway = start(PaymentGatewayApplication.class,
                 PaymentGatewayApplication.CONFIG_NAME);
-        start(ValidationServiceApplication.class, ValidationServiceApplication.CONFIG_NAME);
-        start(LedgerServiceApplication.class, LedgerServiceApplication.CONFIG_NAME);
-        GATEWAY_PORT = Integer.parseInt(gateway.getEnvironment().getProperty("local.server.port"));
+        ConfigurableApplicationContext validation = start(ValidationServiceApplication.class,
+                ValidationServiceApplication.CONFIG_NAME);
+        ConfigurableApplicationContext ledger = start(LedgerServiceApplication.class,
+                LedgerServiceApplication.CONFIG_NAME);
+        GATEWAY_PORT = port(gateway);
+        VALIDATION_PORT = port(validation);
+        LEDGER_PORT = port(ledger);
         JDBC = new JdbcTemplate(new DriverManagerDataSource(POSTGRES.getJdbcUrl(),
                 POSTGRES.getUsername(), POSTGRES.getPassword()));
     }
 
     private Lab() {
+    }
+
+    private static int port(ConfigurableApplicationContext ctx) {
+        return Integer.parseInt(ctx.getEnvironment().getProperty("local.server.port"));
+    }
+
+    static String scrape(int port) {
+        return send(HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/actuator/prometheus"))
+                .GET().build()).body();
     }
 
     private static ConfigurableApplicationContext start(Class<?> app, String configName) {

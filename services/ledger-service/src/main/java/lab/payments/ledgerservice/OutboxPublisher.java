@@ -1,5 +1,7 @@
 package lab.payments.ledgerservice;
 
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import lab.payments.common.Topics;
@@ -18,9 +20,20 @@ class OutboxPublisher {
     private final JdbcTemplate jdbc;
     private final KafkaTemplate<String, String> kafka;
 
-    OutboxPublisher(JdbcTemplate jdbc, KafkaTemplate<String, String> kafka) {
+    OutboxPublisher(JdbcTemplate jdbc, KafkaTemplate<String, String> kafka, MeterRegistry meters) {
         this.jdbc = jdbc;
         this.kafka = kafka;
+        Gauge.builder("ledger.outbox.backlog", () -> count("outbox")).register(meters);
+        Gauge.builder("ledger.pending.payments", () -> count("pending_payments")).register(meters);
+    }
+
+    private double count(String table) {
+        try {
+            Long n = jdbc.queryForObject("SELECT count(*) FROM " + table, Long.class);
+            return n == null ? 0 : n;
+        } catch (RuntimeException e) {
+            return Double.NaN; // database unreachable: report unknown rather than zero
+        }
     }
 
     @Scheduled(fixedDelay = 250)
