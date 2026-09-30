@@ -1,31 +1,50 @@
 #!/usr/bin/env python3
-"""Fails if a report template (or the README template) contains a bare number in its prose.
+"""Fails if a report template contains a number in its prose that is not a generated placeholder.
 
-Numbers must arrive through {{placeholders}} generated from results/*. Allowed without a placeholder:
-finding and ADR ids, milestone ids, HTTP status codes and other fixed technical names listed below,
-anything inside code fences or inline code, and list numbering.
+Numbers must arrive through {{placeholders}} generated from results/* or the configuration files.
+Checked: digits, number words (two, eighty, percent, twice, half ...), in prose, headings, table cells,
+link text and inline code alike, and the string values of findings.json. Only these are exempt:
+placeholders, fenced code blocks and HTML comments, link targets, finding/ADR/milestone ids, a
+single-digit "section N" or "Appendix X" cross-reference, list numbering, section-heading numbers,
+and a few fixed technical names (p50/p95/p99, lz4, N+1, "answers 503", "HTTP 404" style status codes).
 """
 from __future__ import annotations
 
 import glob
+import json
 import os
 import re
 import sys
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
 ALLOWED = [
-    r"\{\{[^}]*\}\}", r"`[^`]*`", r"F-\d+", r"ADR-\d+", r"\bM\d\b", r"§\s*\d+(?:\.\d+)?",
-    r"\bp\d{2}\b", r"\blz4\b", r"\bJava 21\b", r"\bPostgres 16\b", r"\bRedis 7\b", r"\bKafka 3(?:\.\d+)?\b",
-    r"\bSpring Boot 3(?:\.\d+)?\b", r"\bk6\b", r"\bSHA-256\b", r"\bUUIDv5\b", r"pacs\.008", r"\bRF=1\b",
-    r"\b(?:202|404|422|503)\b", r"\bx-axis\b", r"\bN\+1\b", r"\b[Ss]ections? \d+(?:\.\d+)?\b", r"\bAppendix [A-C]\b", r"\bQ-[A-Z]\b", r"\bv0\.1\.0\b",
-    r"^\s*\d+\.\s", r"^#+ [\dA-Z]*\.? ?", r"\[[^\]]*\]\([^)]*\)", r"https?://\S+",
+    r"\{\{[^}]*\}\}",                                   # generated placeholder
+    r"\]\([^)]*\)", r"https?://\S+",                    # link targets and bare URLs
+    r"\bF-(?:0[1-9]|1[0-3])\b", r"\bADR-000[1-9]\b", r"\bM[0-7]\b", r"\bQ-[A-G]\b",
+    r"\b[Ss]ections? [1-9]\b", r"\bAppendix [A-C]\b",
+    r"\bdouble-entry\b", r"\bp(?:50|95|99)\b", r"\blz4\b", r"\bN\+1\b", r"\bSHA-256\b", r"\bUUIDv5\b",
+    r"\bHTTP (?:202|404|422|503)\b", r"\banswers 503\b", r"\bpacs\.008\b",
+    r"^\s*\d+\.\s", r"^#{1,4} (?:[1-9]\d?\. |Appendix [A-C]\. )",
 ]
+
+NUMBER_WORDS = (
+    "two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|"
+    "twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|dozen|"
+    "percent|per cent|fold|twice|thrice|double|triple|half|quarter|times"
+)
+NUMBER_WORD_RE = re.compile(rf"\b(?:{NUMBER_WORDS})\b", re.I)
+
+
+def _blank(match: re.Match) -> str:
+    return "\n" * match.group(0).count("\n")
 
 
 def strip(text: str) -> str:
-    # Blank out fenced code and comments but keep their newlines so reported line numbers stay right.
-    text = re.sub(r"```.*?```", lambda m: "\n" * m.group(0).count("\n"), text, flags=re.S)
-    text = re.sub(r"<!--.*?-->", lambda m: "\n" * m.group(0).count("\n"), text, flags=re.S)
+    """Blank out fenced code and comments (keeping newlines so reported line numbers stay right), then
+    remove the exempt patterns line by line."""
+    text = re.sub(r"```.*?```", _blank, text, flags=re.S)
+    text = re.sub(r"<!--.*?-->", _blank, text, flags=re.S)
     out = []
     for line in text.splitlines():
         for pattern in ALLOWED:
@@ -34,29 +53,55 @@ def strip(text: str) -> str:
     return "\n".join(out)
 
 
-def lint(path: str) -> list:
+def lint_text(text: str, name: str) -> list:
     problems = []
-    with open(path) as fh:
-        text = fh.read()
     original = text.splitlines()
     for i, line in enumerate(strip(text).splitlines()):
-        m = re.search(r"\d", line)
-        if m:
+        found = re.search(r"\d", line) or NUMBER_WORD_RE.search(line)
+        if found:
             src = original[i] if i < len(original) else line
-            problems.append(f"{os.path.relpath(path, ROOT)}:{i + 1}: bare number in prose: {src.strip()[:100]}")
+            problems.append(f"{name}:{i + 1}: number in prose ({found.group(0)!r}); use a generated placeholder: {src.strip()[:90]}")
     return problems
 
 
+def lint_json(path: str) -> list:
+    """findings.json strings end up in the reports, so they are held to the same rule."""
+    problems = []
+    with open(path) as fh:
+        data = json.load(fh)
+
+    def walk(node, where):
+        if isinstance(node, str):
+            problems.extend(lint_text(node, f"{os.path.relpath(path, ROOT)}[{where}]"))
+        elif isinstance(node, list):
+            for i, item in enumerate(node):
+                walk(item, f"{where}.{i}")
+        elif isinstance(node, dict):
+            for key, value in node.items():
+                if key not in ("impact",):  # assessed scores are structured data, not prose
+                    walk(value, f"{where}.{key}")
+    walk(data, "$")
+    return problems
+
+
+def lint(path: str) -> list:
+    if path.endswith(".json"):
+        return lint_json(path)
+    with open(path) as fh:
+        return lint_text(fh.read(), os.path.relpath(path, ROOT))
+
+
 def main() -> int:
-    paths = sys.argv[1:] or sorted(glob.glob(os.path.join(ROOT, "sample-deliverable", "src", "*.tmpl"))
-                                    + glob.glob(os.path.join(ROOT, "report", "src", "*.tmpl")))
+    paths = sys.argv[1:] or (sorted(glob.glob(os.path.join(ROOT, "sample-deliverable", "src", "*.tmpl")))
+                             + sorted(glob.glob(os.path.join(ROOT, "sample-deliverable", "src", "*.json")))
+                             + sorted(glob.glob(os.path.join(ROOT, "report", "src", "*.tmpl"))))
     problems = [p for path in paths for p in lint(path)]
     for p in problems:
         print(p, file=sys.stderr)
     if problems:
-        print(f"{len(problems)} bare number(s): move them behind a generated placeholder.", file=sys.stderr)
+        print(f"{len(problems)} problem(s): move each number behind a generated placeholder.", file=sys.stderr)
         return 1
-    print(f"ok: no bare numbers in {len(paths)} template(s)")
+    print(f"ok: no hand-typed numbers in {len(paths)} file(s)")
     return 0
 
 

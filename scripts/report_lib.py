@@ -109,6 +109,19 @@ def rel(path: str) -> str:
     return os.path.relpath(path, ROOT)
 
 
+def tuned_blocks(run: Run) -> dict:
+    """The tuned configuration recorded in a run's env.txt, split per service."""
+    blocks, name = {}, None
+    for line in run.tuned_config.splitlines():
+        m = re.match(r"\s*--- (\S+?)-tuned\.yml", line)
+        if m:
+            name = m.group(1)
+            blocks[name] = []
+        elif name is not None:
+            blocks[name].append(line[2:] if line.startswith("  ") else line)
+    return {k: "\n".join(v) for k, v in blocks.items()}
+
+
 # --------------------------------------------------------------------- facts
 
 def pass_through(run: Run):
@@ -134,6 +147,19 @@ def steady_bounds(runs: dict, profile: str):
             fails += [p["target_req_per_s"] for p in run.phases
                       if not p["meets_slo"] and p["target_req_per_s"] > passed]
     return passed, (min(fails) if fails else None)
+
+
+def steady_fail_source(runs: dict, profile: str):
+    """Name of the run in which the profile's first missed step above its sustained rate was offered."""
+    passed, failed = steady_bounds(runs, profile)
+    if failed is None:
+        return None
+    for run in runs.values():
+        if run.profile == profile and run.scenario == "steady":
+            for p in run.phases:
+                if p["target_req_per_s"] == failed and not p["meets_slo"]:
+                    return os.path.basename(run.dir)
+    return None
 
 
 def cold_first_step_note(runs: dict) -> str:
@@ -166,6 +192,16 @@ def spike_recovery_text(run: Run) -> str:
     return f"{seconds:.0f} s after the burst ended"
 
 
+def _short_java(text: str) -> str:
+    m = re.search(r'"([\d.]+)"', text)
+    return f"Java {m.group(1)}" if m else text
+
+
+def _short_k6(text: str) -> str:
+    m = re.match(r"k6 (v[\d.]+)", text)
+    return f"k6 {m.group(1)}" if m else text
+
+
 def env_summary(runs: dict) -> dict:
     any_run = next(iter(runs.values()))
     e = any_run.env
@@ -174,8 +210,9 @@ def env_summary(runs: dict) -> dict:
         "cpu_model": e["cpu_model"], "cores": e["cpu_cores"],
         "ram_gb": f"{int(e['ram_bytes']) / 2**30:.0f}",
         "docker_vm": e["docker_vm"].replace("mem_bytes=", "memory bytes ="),
-        "java": e["java"], "k6": e["k6"], "os": e["os"],
+        "java": _short_java(e["java"]), "k6": _short_k6(e["k6"]), "os": e["os"],
         "git_shas": ", ".join(f"`{s}`" for s in shas),
+        "git_revisions_label": "revision" if len(shas) == 1 else "revisions",
         "date": any_run.date,
         "note": e["note"][:1].upper() + e["note"][1:],
     }
@@ -243,10 +280,12 @@ def extra_runs_table(runs: dict) -> str:
                   "End-to-end p99", "Dropped iterations", "SLO met"], rows)
 
 
-def invariants_table(runs: dict) -> str:
+def invariants_table(runs: dict, profile=None) -> str:
     rows = []
     for key in sorted(runs):
         r = runs[key]
+        if profile and r.profile != profile:
+            continue
         i = r.result["invariants"]
         rows.append([f"`{os.path.basename(r.dir)}`", r.result["pipeline"]["payments_created"],
                      yes_no(i["all_hold"]), i["negative_balances"], i["debits_minus_credits_minor"],
@@ -268,7 +307,7 @@ def explain_table(runs: dict) -> str:
             removed = re.search(r"Rows Removed by Filter: (\d+)", section)
             rows.append([prof, title.split(" (")[0].replace("F-06 ", ""),
                          node.strip() if node else "n/a",
-                         removed.group(1) if removed else "n/a",
+                         removed.group(1) if removed else "none reported",
                          f"{float(exec_ms.group(1)):.2f} ms" if exec_ms else "n/a"])
     return table(["Profile", "Query", "Plan node", "Rows removed by filter", "Execution time"], rows)
 

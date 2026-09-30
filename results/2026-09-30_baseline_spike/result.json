@@ -104,12 +104,20 @@
   },
   "phases_unattributed_payments": 0,
   "spike": {
-    "recovery_seconds_after_burst": 120.0,
+    "recovery_seconds_after_burst": null,
     "recovered_within_run": false,
-    "recovery_definition": "seconds after the burst ends until payments created afterwards complete under the 500 ms SLO again (last slow payment's creation time)"
+    "recovery_definition": "seconds after the burst ends until payments created afterwards complete under the 500 ms SLO again (last slow payment's creation time)",
+    "recovery_at_least_seconds": 120.0
   },
   "slo": {
     "error_rate_under_0_1pct": true,
     "lag_recovers_within_2min": false
-  }
+  },
+  "result_migrations": [
+    {
+      "script": "scripts/normalize_results.py",
+      "change": "recovery_seconds_after_burst set to null because the spike had not recovered within the run; the former value is kept as recovery_at_least_seconds",
+      "reason": "the collector was changed to record an unrecovered spike this way after this run was recorded"
+    }
+  ]
 }

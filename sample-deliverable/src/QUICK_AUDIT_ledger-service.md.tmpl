@@ -10,11 +10,11 @@ Read the service's code and configuration as found (the baseline profile), trace
 
 ## Findings
 
-Seven findings, ordered by expected value. Where a finding corresponds to one in the full report, its identifier is given in brackets; the others are specific to this service.
+{{fact.section_findings}} findings, ordered by expected value. Where a finding corresponds to one in the full report, its identifier is given in brackets; the others are specific to this service.
 
 ### Q-A (F-04) One transaction and many round trips per record
 
-- **Observation.** Each record opens a transaction, locks two account rows, checks for a duplicate, reads the day's outflow, inserts two postings, updates two balances and writes an outbox row, one statement at a time.
+- **Observation.** Each record opens a transaction, locks the debtor and creditor account rows, checks for a duplicate, reads the day's outflow, inserts the debit and credit postings, updates both balances and writes an outbox row, one statement at a time.
 - **Impact.** The number of commits and network round trips grows one-for-one with payments, and the account row locks are held across all of them. Expected to be the largest single cost in this service; not confirmed by a measurement.
 - **Recommendation.** Process a poll as one transaction with batched statements, lock the accounts of the whole batch in one ordered statement, and keep the dedup record in the same transaction. Isolate a poison record instead of failing the batch.
 - **Effort.** M. **Risk.** High: the dedup, sequence-ordering and lock-ordering rules must be preserved exactly.
@@ -35,7 +35,7 @@ Seven findings, ordered by expected value. Where a finding corresponds to one in
 
 ### Q-D (F-07) Connection pool left at its default
 
-- **Observation.** The database pool uses the driver default size while the service is designed to run several consumer threads, each needing a connection for the duration of its unit of work.
+- **Observation.** The database pool uses the driver default size. Each consumer thread needs a connection for the duration of its unit of work, so the pool matters as soon as the thread count is raised.
 - **Impact.** Once concurrency is raised, threads wait for connections; sized badly, the pool becomes the limit rather than the database.
 - **Recommendation.** Size the pool from the database's capacity shared across all services, and set the acquisition timeout above the longest unit of work. Measure rather than guess.
 - **Effort.** S. **Risk.** Low.
@@ -44,7 +44,7 @@ Seven findings, ordered by expected value. Where a finding corresponds to one in
 
 - **Observation.** After each record the listener calls a synchronised flush that sends outbox rows to the broker and waits for each acknowledgement.
 - **Impact.** With more than one consumer thread the synchronisation serialises them at the flush, and each record's latency includes broker round trips for rows it did not write.
-- **Recommendation.** Publish from a separate scheduled publisher, batch the sends asynchronously, and delete only acknowledged rows. The outbox itself is the right design and should stay.
+- **Recommendation.** The outbox already has a scheduled publisher; stop calling the flush from the listener and let the scheduled publisher do the work, batch the sends asynchronously, and delete only acknowledged rows. The outbox itself is the right design and should stay.
 - **Effort.** S. **Risk.** Low.
 
 ### Q-F Dead-lettering can strand a debtor
@@ -63,7 +63,7 @@ Seven findings, ordered by expected value. Where a finding corresponds to one in
 
 ## Suggested order
 
-Start with Q-B and Q-D (small, safe), then Q-E, then Q-C together with Q-A once partitions and pools allow real concurrency. Treat Q-F as parallel work: it is about operability rather than speed.
+Start with Q-B and Q-D (small, safe), then Q-E, then Q-C together with Q-A once partitions and pools allow real concurrency. Treat Q-F as parallel work: it is about operability rather than speed. Q-G can be done at any time.
 
 ## What a full audit would add
 

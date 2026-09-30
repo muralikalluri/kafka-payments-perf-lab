@@ -20,7 +20,8 @@
     "risk": "Medium",
     "plan": "Next sprint",
     "depends_on": [
-      "F-12"
+      "F-12",
+      "F-07"
     ]
   },
   {
