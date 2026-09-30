@@ -1,5 +1,6 @@
 lab:
   tuning:
+    f01: false   # F-01: async producer sends with callbacks (baseline: synchronous send().get())
     f12: false   # F-12: record key = debtor account id (baseline: merchant id)
 spring:
   application:

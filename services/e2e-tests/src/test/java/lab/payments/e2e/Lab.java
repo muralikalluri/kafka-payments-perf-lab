@@ -35,6 +35,9 @@ final class Lab {
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16");
     static final KafkaContainer KAFKA = new KafkaContainer("apache/kafka:3.8.0");
     static final JdbcTemplate JDBC;
+    static final ConfigurableApplicationContext GATEWAY;
+    static final ConfigurableApplicationContext VALIDATION;
+    static final ConfigurableApplicationContext LEDGER;
     static final int GATEWAY_PORT;
     static final int VALIDATION_PORT;
     static final int LEDGER_PORT;
@@ -44,15 +47,15 @@ final class Lab {
         POSTGRES.start();
         KAFKA.start();
         System.setProperty("LAB_PROFILE", PROFILE);
-        ConfigurableApplicationContext gateway = start(PaymentGatewayApplication.class,
+        GATEWAY = start(PaymentGatewayApplication.class,
                 PaymentGatewayApplication.CONFIG_NAME);
-        ConfigurableApplicationContext validation = start(ValidationServiceApplication.class,
+        VALIDATION = start(ValidationServiceApplication.class,
                 ValidationServiceApplication.CONFIG_NAME);
-        ConfigurableApplicationContext ledger = start(LedgerServiceApplication.class,
+        LEDGER = start(LedgerServiceApplication.class,
                 LedgerServiceApplication.CONFIG_NAME);
-        GATEWAY_PORT = port(gateway);
-        VALIDATION_PORT = port(validation);
-        LEDGER_PORT = port(ledger);
+        GATEWAY_PORT = port(GATEWAY);
+        VALIDATION_PORT = port(VALIDATION);
+        LEDGER_PORT = port(LEDGER);
         JDBC = new JdbcTemplate(new DriverManagerDataSource(POSTGRES.getJdbcUrl(),
                 POSTGRES.getUsername(), POSTGRES.getPassword()));
     }
