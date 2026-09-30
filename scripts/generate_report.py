@@ -346,6 +346,96 @@ def headline_table(runs: dict, b_pass, b_fail, t_pass, t_fail, source: str) -> s
     return L.table(["", "Baseline", "Tuned"], rows)
 
 
+def mvp_status(runs: dict) -> list:
+    """(item, done, evidence) for every SPEC MVP item, checked against the repository itself (files, config,
+    results), never against prose. Kept free of git commands so it gives the same answer in a shallow CI clone."""
+    root = L.ROOT
+
+    def path(*parts):
+        return os.path.join(root, *parts)
+
+    def exists(*parts):
+        return os.path.exists(path(*parts))
+
+    def contains(rel: str, needle: str) -> bool:
+        return exists(rel) and needle in open(path(rel)).read()
+
+    java = "services/{svc}/src/main/java/lab/payments/{pkg}/{cls}"
+    tuned = {svc: read_yml(svc, "tuned") for svc in ("payment-gateway", "validation-service", "ledger-service")}
+    baseline = {svc: read_yml(svc, "baseline") for svc in tuned}
+    services = ["payment-gateway", "validation-service", "ledger-service"]
+    compose = open(path("docker-compose.yml")).read()
+    dashboards = [f for f in os.listdir(path("grafana", "dashboards")) if f.endswith(".json")]
+    cfg_b = yml_int(baseline["ledger-service"], "concurrency")
+    cfg_t = yml_int(tuned["ledger-service"], "concurrency")
+
+    def flag(svc, name):
+        return f"{name}: true" in tuned[svc]
+
+    findings = [
+        ("F-01", flag("payment-gateway", "f01") and "linger.ms" in tuned["payment-gateway"],
+         "gateway and ledger tuned config; async publishers"),
+        ("F-03", cfg_t is not None and cfg_b is not None and cfg_t > cfg_b, "consumer concurrency in *-tuned.yml"),
+        ("F-04", flag("ledger-service", "f04") and exists("services", "ledger-service", "src", "main", "java", "lab",
+                                                          "payments", "ledgerservice", "BatchLedgerProcessor.java"),
+         "BatchLedgerProcessor"),
+        ("F-06", any(f.startswith("V100") for f in os.listdir(path("services", "ledger-service", "src", "main",
+                                                                  "resources", "db", "ledger-tuned")))
+         and any(f.startswith("V100") for f in os.listdir(path("services", "payment-gateway", "src", "main",
+                                                               "resources", "db", "gateway-tuned"))),
+         "db/*-tuned migrations"),
+        ("F-07", flag("payment-gateway", "f07") and exists("services", "payment-gateway", "src", "main", "java", "lab",
+                                                           "payments", "paymentgateway", "GatewayOutboxPublisher.java"),
+         "GatewayOutboxPublisher, pool sizes"),
+        ("F-08", flag("validation-service", "f08") and exists("services", "validation-service", "src", "main", "java",
+                                                              "lab", "payments", "validationservice",
+                                                              "ProjectionReferenceData.java"),
+         "ProjectionReferenceData"),
+        ("F-12", all(flag(s, "f12") for s in services) and yml_int(tuned["ledger-service"], "partitions")
+         > (yml_int(baseline["ledger-service"], "partitions") or 0), "record key flag, partitions"),
+        ("F-13", flag("validation-service", "f13") and exists("services", "validation-service", "src", "main", "java",
+                                                              "lab", "payments", "validationservice", "AccountCache.java"),
+         "AccountCache, CachedReferenceData"),
+    ]
+    baseline_flags_off = all(f"{f}: false" in open(path("services", svc, "src", "main", "resources", f"{svc}.yml")).read()
+                             for svc, f in [("payment-gateway", "f07"), ("ledger-service", "f04"),
+                                            ("validation-service", "f13")])
+
+    rows = [
+        ("Gateway, validation and ledger services", all(exists("services", s, "pom.xml") for s in services), "services/"),
+        ("Notification service stubbed, not built",
+         exists("services", "payment-gateway", "src", "main", "java", "lab", "payments", "paymentgateway",
+                "NotificationStub.java") and not exists("services", "notification-service"), "NotificationStub"),
+        ("Single Kafka broker", compose.count("\n  kafka:") == 1 and "kafka-2" not in compose, "docker-compose.yml"),
+        ("Baseline anti-patterns kept behind default-off tuning flags", baseline_flags_off, "base *.yml flags"),
+    ]
+    rows += [(f"{fid} tuned implementation", ok, ev) for fid, ok, ev in findings]
+    rows += [
+        ("k6 smoke, steady and spike scenarios",
+         all(exists("load", "k6", f"{n}.js") for n in ("smoke", "steady", "spike")), "load/k6/"),
+        ("Benchmark runner and results format", exists("scripts", "run-benchmark.sh") and exists("scripts", "collect_results.py"),
+         "scripts/"),
+        ("Prometheus and exactly one Grafana dashboard", exists("monitoring", "prometheus.yml") and len(dashboards) == 1,
+         "monitoring/, grafana/dashboards/"),
+        ("Results recorded for smoke, steady and spike, both profiles",
+         all(f"{p}_{n}" in runs for p in ("baseline", "tuned") for n in ("smoke", "steady", "spike")), "results/"),
+        ("Quick audit and full audit report samples",
+         exists("sample-deliverable", "QUICK_AUDIT_ledger-service.md") and exists("sample-deliverable", "AUDIT_REPORT_SAMPLE.md"),
+         "sample-deliverable/"),
+        ("Tuned profile marked complete (gate in the runner)", "complete: true" in tuned["payment-gateway"],
+         "payment-gateway-tuned.yml"),
+        ("Nothing marked Later was built (no soak, Jaeger, notification service, report template folder)",
+         not exists("load", "k6", "soak.js") and "jaeger" not in compose.lower()
+         and not exists("services", "notification-service") and not exists("report", "template"), "absence checks"),
+    ]
+    return rows
+
+
+def mvp_status_table(runs: dict) -> str:
+    rows = mvp_status(runs)
+    return L.table(["MVP item", "Status", "Checked in"], [[i, "done" if ok else "**NOT DONE**", ev] for i, ok, ev in rows])
+
+
 def payment_share(runs: dict) -> str:
     created = sum(r.result["pipeline"]["payments_created"] for r in runs.values() if r.scenario in ("steady", "spike"))
     sent = sum(r.result["k6"]["http_reqs"] for r in runs.values() if r.scenario in ("steady", "spike"))
@@ -431,6 +521,7 @@ def build_values(runs: dict) -> dict:
         "fact.gif_caption": gif_caption(runs),
         "table.headline": headline_table(runs, b_pass, b_fail, t_pass, t_fail, fail_source),
         "table.adrs": L.adr_table(),
+        "table.mvp_status": mvp_status_table(runs),
         "fact.quadrants": quadrants_sentence(fs),
         "table.steady_baseline": L.steady_table(runs["baseline_steady"]),
         "table.steady_tuned": L.steady_table(runs["tuned_steady"]),

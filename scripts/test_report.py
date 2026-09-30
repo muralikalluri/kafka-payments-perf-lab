@@ -231,6 +231,20 @@ class FreshnessTest(unittest.TestCase):
                 self.assertEqual(fh.read(), expected, f"{name} is stale: run scripts/generate_report.py")
 
 
+class ScopeTest(unittest.TestCase):
+    def test_every_mvp_item_is_actually_done(self):
+        runs = L.load_runs()
+        rows = G.mvp_status(runs)
+        self.assertGreaterEqual(len(rows), 19)  # a floor, so removing a row from the check is noticed
+        missing = [item for item, ok, _ in rows if not ok]
+        self.assertEqual(missing, [], f"MVP items not done: {missing}")
+
+    def test_scope_check_notices_a_missing_item(self):
+        runs = L.load_runs()
+        broken = {k: v for k, v in runs.items() if k != "tuned_spike"}
+        self.assertTrue([i for i, ok, _ in G.mvp_status(broken) if not ok])
+
+
 class ReadmeTest(unittest.TestCase):
     """The global README order: pitch and badges, GIF, results, architecture, quickstart, features, design
     decisions, sample deliverable, hire-me link. Plus link integrity and the insecure-code banner."""

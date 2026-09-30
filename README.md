@@ -94,7 +94,31 @@ The findings covered: F-01 producer batching, F-03 consumer concurrency, F-04 ba
 
 ### Scope and known gaps
 
-Built to the MVP cut in [SPEC.md](SPEC.md). Not built, by design: F-02, F-05, F-09, F-10 and F-11, the notification service, a multi-broker cluster, the soak scenario and Gatling, tracing and flame graphs, PDF styling and a reusable report template folder.
+Built to the MVP cut in [SPEC.md](SPEC.md). Each item below is checked against the repository (files, configuration and results) when this README is generated, so it cannot claim more than exists:
+
+| MVP item | Status | Checked in |
+|---|---|---|
+| Gateway, validation and ledger services | done | services/ |
+| Notification service stubbed, not built | done | NotificationStub |
+| Single Kafka broker | done | docker-compose.yml |
+| Baseline anti-patterns kept behind default-off tuning flags | done | base *.yml flags |
+| F-01 tuned implementation | done | gateway and ledger tuned config; async publishers |
+| F-03 tuned implementation | done | consumer concurrency in *-tuned.yml |
+| F-04 tuned implementation | done | BatchLedgerProcessor |
+| F-06 tuned implementation | done | db/*-tuned migrations |
+| F-07 tuned implementation | done | GatewayOutboxPublisher, pool sizes |
+| F-08 tuned implementation | done | ProjectionReferenceData |
+| F-12 tuned implementation | done | record key flag, partitions |
+| F-13 tuned implementation | done | AccountCache, CachedReferenceData |
+| k6 smoke, steady and spike scenarios | done | load/k6/ |
+| Benchmark runner and results format | done | scripts/ |
+| Prometheus and exactly one Grafana dashboard | done | monitoring/, grafana/dashboards/ |
+| Results recorded for smoke, steady and spike, both profiles | done | results/ |
+| Quick audit and full audit report samples | done | sample-deliverable/ |
+| Tuned profile marked complete (gate in the runner) | done | payment-gateway-tuned.yml |
+| Nothing marked Later was built (no soak, Jaeger, notification service, report template folder) | done | absence checks |
+
+Not built, by design (marked Later in SPEC.md): F-02, F-05, F-09, F-10 and F-11, the notification service, a multi-broker cluster, the soak scenario and Gatling, tracing and flame graphs, PDF styling and a reusable report template folder.
 
 Known gaps in what was built: no load shedding on the gateway outbox backlog; no consumer-lag, CPU, garbage-collection or lock-wait snapshots stored with the results; FX rates are cached in process rather than in Redis; connection-pool sizes are unswept lab choices; the cache accepts bounded staleness (a blocked account can be approved until its cached copy is invalidated or expires).
 
