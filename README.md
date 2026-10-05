@@ -42,7 +42,8 @@ The same offered rates against both profiles (end-to-end = payment accepted unti
 - The burst rate is below the highest step the tuned profile sustained in the steady runs, so the tuned system was never overloaded by the burst: this shows no degradation under the same load, not a faster recovery.
 - An earlier recording of the baseline spike scenario (commit `eecb939`), made before the baseline-affecting fixes, recovered within the window; the standard recording used in the tables above did not. A further recording, taken while the dashboard was being captured (`2026-09-30_baseline_spike_recorded`), also recovered. The recordings disagree, which shows run-to-run variance in this scenario for the baseline; no cause was attributed and no single recovery time is claimed.
 - The tuned profile has a higher median end-to-end latency than the baseline at low load (the smoke run and the lowest steady step). The likely causes are the outbox polling on the gateway and the ledger and producer lingering, but that was not verified. It is a real trade-off: a higher latency floor at low load in exchange for capacity at high load.
-- The combination of all 13 changes was measured. The effect of each change alone was not isolated. No per-stage measurements (consumer lag, CPU, garbage collection, lock waits) were captured for these runs, so no single component is named as the bottleneck. See the limits section of the [sample audit report](sample-deliverable/AUDIT_REPORT_SAMPLE.md).
+- The combination of the 8 changes (F-01, F-03, F-04, F-06, F-07, F-08, F-12, F-13) in the recorded tuned runs was measured. The effect of each change alone was not isolated. No per-stage measurements (consumer lag, CPU, garbage collection, lock waits) were captured for these runs, so no single component is named as the bottleneck. See the limits section of the [sample audit report](sample-deliverable/AUDIT_REPORT_SAMPLE.md).
+- F-02, F-05, F-09, F-10, F-11 are implemented in the repository but were not part of any recorded benchmark run: the recorded tuned runs carry only the changes listed above, and the recorded baseline runs predate the baseline anti-patterns that go with the others. The text on those findings rests on code, tests and mechanism, and no measured figure in this report is attributed to them.
 - Correctness held in every run: no negative balances, debits equal credits, every payment reached a terminal state (729,781 payments across 10 runs).
 
 ## Architecture
@@ -84,7 +85,7 @@ Results land in `results/<date>_<profile>_<scenario>/` (`result.json`, `summary.
 
 ## Features
 
-- 4 services (gateway, validation, ledger and a notification service with a webhook simulator), on a single Kafka broker with replication factor 1 in KRaft mode, Postgres with Flyway, and Redis for the tuned cache.
+- 4 services (gateway, validation, ledger and a notification service with a webhook simulator), on a 3-broker Kafka cluster (replication factor 3) in KRaft mode (the recorded results used a single Kafka broker with replication factor 1), Postgres with Flyway, and Redis for the tuned cache.
 - Profiles: `baseline` carries common real-world anti-patterns on purpose; `tuned` fixes each numbered finding behind its own flag, one commit per finding.
 - Load scenarios in k6 (smoke, soak, spike, steady) and the same workload in Gatling, and a runner that resets the stack, records the environment, checks the ledger invariants and derives every figure from the database and the load tool's output.
 - Micrometer metrics, Prometheus, Kafka and Postgres exporters and one provisioned Grafana dashboard, with per-stage metric snapshots stored beside each result.

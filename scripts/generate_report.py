@@ -12,6 +12,7 @@ Usage: generate_report.py            write the reports
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -74,7 +75,8 @@ def cfg_facts(runs: dict) -> dict:
         "tuned_batch_size": yml_int(tuned["payment-gateway"], "batch-size"),
         "tuned_max_poll_records": yml_int(tuned["ledger-service"], "max-poll-records"),
         "baseline_in_flight": yml_int(read_yml("payment-gateway", "baseline"), "max.in.flight.requests.per.connection"),
-        "tuned_in_flight": yml_int(tuned["payment-gateway"], "max.in.flight.requests.per.connection"),
+        # F-02 is not in the recorded tuned runs, so this one is read from the repository's tuned file, not from env.txt
+        "tuned_in_flight": yml_int(read_yml("payment-gateway", "tuned"), "max.in.flight.requests.per.connection"),
         "settlement_shards": yml_int(read_base_yml("ledger-service"), "shards"),
         "cache_ttl_seconds": yml_int(tuned["validation-service"], "ttl-seconds"),
     }
@@ -187,19 +189,20 @@ def plan_table(fs: list) -> str:
     return L.table(["Sequence", "ID", "Change", "Effort", "Risk", "Depends on"], rows)
 
 
-def top_three(fs: list) -> str:
+def top_three(fs: list, runs: dict) -> str:
     ranked = sorted(fs, key=lambda f: (-f["impact"], EFFORT_ORDER.index(f["effort"]), RISK_ORDER.index(f["risk"])))[:TOP_N]
     ids = {f["id"] for f in ranked}
     parts = []
     for f in ranked:
         needs = [d for d in f["depends_on"] if d not in ids]
-        parts.append(f"{f['id']}" + (f" (needs {', '.join(needs)} first)" if needs else ""))
+        label = annotate_unmeasured(runs, [f["id"]])[0]
+        parts.append(label + (f" (needs {', '.join(needs)} first)" if needs else ""))
     return ", ".join(parts)
 
 
-def quadrants_sentence(fs: list) -> str:
-    wins = [f["id"] for f in fs if quadrant(f) == "Quick win"]
-    majors = [f["id"] for f in fs if quadrant(f) == "Major project"]
+def quadrants_sentence(fs: list, runs: dict) -> str:
+    wins = annotate_unmeasured(runs, [f["id"] for f in fs if quadrant(f) == "Quick win"])
+    majors = annotate_unmeasured(runs, [f["id"] for f in fs if quadrant(f) == "Major project"])
     return f"quick wins {', '.join(wins)}; major projects {', '.join(majors)}"
 
 
@@ -315,6 +318,39 @@ def jaeger_port() -> str:
     with open(os.path.join(L.ROOT, "docker-compose.yml")) as fh:
         m = re.search(r'"(\d+):16686"', fh.read())
     return m.group(1) if m else "unknown"
+
+
+def webhook_latency_default() -> str:
+    """Default latency of the webhook simulator, read from its configuration (F-05 is not in the recorded runs)."""
+    with open(os.path.join(L.ROOT, "services", "notification-service", "src", "main", "resources",
+                           "notification-service.yml")) as fh:
+        m = re.search(r"latency-ms:\s*\$\{WEBHOOK_LATENCY_MS:(\d+)\}", fh.read())
+    if not m:
+        raise SystemExit("webhook simulator latency default not found in notification-service.yml")
+    return m.group(1)
+
+
+def tuned_jvm_opts() -> str:
+    """Tuned JVM options (G1 case), read from the benchmark runner (F-10 is not in the recorded runs)."""
+    with open(os.path.join(L.ROOT, "scripts", "run-benchmark.sh")) as fh:
+        m = re.search(r'^\s*g1\)\s+JVM_OPTS="([^"]+)"', fh.read(), re.M)
+    if not m:
+        raise SystemExit("tuned JVM options not found in run-benchmark.sh")
+    return m.group(1)
+
+
+def compose_topology() -> str:
+    """Broker layout of the default compose file (what a reader gets when starting the stack today)."""
+    with open(os.path.join(L.ROOT, "docker-compose.yml")) as fh:
+        brokers = len(re.findall(r"^  kafka(?:-\d+)?:\s*$", fh.read(), re.M))
+    rf = None
+    env = os.path.join(L.ROOT, ".env.example")
+    if os.path.exists(env):
+        m = re.search(r"^LAB_TOPIC_REPLICAS=(\d+)", open(env).read(), re.M)
+        rf = int(m.group(1)) if m else None
+    if brokers <= 1:
+        return "a single Kafka broker"
+    return f"a {brokers}-broker Kafka cluster" + (f" (replication factor {rf})" if rf else "")
 
 
 def java_version() -> str:
@@ -515,9 +551,51 @@ def ablated_findings(runs: dict) -> list:
     return sorted(set(ids))
 
 
-def isolation_sentence(runs: dict, n: int) -> str:
+def measured_findings(runs: dict) -> list:
+    """Findings whose tuned change was active in the recorded tuned runs, read from the configuration recorded in
+    their own env.txt: every `fNN: true` flag, plus F-03 (more consumer threads than the baseline) and F-06 (the tuned
+    migrations). A finding implemented after the runs were recorded is not in this list."""
+    run = runs["tuned_steady"]
+    blocks = L.tuned_blocks(run)
+    ids = {m.upper() for text in blocks.values() for m in re.findall(r"^\s*(f\d\d):\s*true\b", text, re.M)}
+    ids = {f"F-{i[1:]}" for i in ids}
+    base = yml_int(read_yml("ledger-service", "baseline"), "concurrency")
+    tuned = yml_int(blocks.get("ledger-service", ""), "concurrency")
+    if base is not None and tuned is not None and tuned > base:
+        ids.add("F-03")
+    if any("-tuned" in line for text in blocks.values() for line in text.splitlines() if "locations:" in line):
+        ids.add("F-06")
+    return sorted(ids)
+
+
+def measured_changes_phrase(runs: dict) -> str:
+    ids = measured_findings(runs)
+    return f"{len(ids)} changes ({', '.join(ids)})"
+
+
+def unmeasured_findings(runs: dict) -> list:
+    measured = set(measured_findings(runs))
+    return [f["id"] for f in findings() if f["id"] not in measured]
+
+
+def unmeasured_note(runs: dict) -> str:
+    ids = unmeasured_findings(runs)
+    if not ids:
+        return "Every finding in this report was part of the recorded tuned runs."
+    return (f"{', '.join(ids)} are implemented in the repository but were not part of any recorded benchmark run: the recorded "
+            "tuned runs carry only the changes listed above, and the recorded baseline runs predate the baseline "
+            "anti-patterns that go with the others. The text on those findings rests on code, tests and mechanism, and no "
+            "measured figure in this report is attributed to them.")
+
+
+def annotate_unmeasured(runs: dict, ids: list) -> list:
+    unmeasured = set(unmeasured_findings(runs))
+    return [f"{i} (not benchmarked)" if i in unmeasured else i for i in ids]
+
+
+def isolation_sentence(runs: dict) -> str:
     ablated = ablated_findings(runs)
-    text = f"The combination of all {n} changes was measured. "
+    text = f"The combination of the {measured_changes_phrase(runs)} in the recorded tuned runs was measured. "
     if ablated:
         text += (f"The effect of {', '.join(ablated)} alone was isolated with an ablation run (the tuned profile with that one "
                  "change switched off); the effect of the other changes alone was not.")
@@ -673,7 +751,7 @@ def build_values(runs: dict) -> dict:
         "fact.mix_normal": pct(mix["normal"]), "fact.mix_duplicate": pct(mix["duplicate"]),
         "fact.mix_failing": pct(mix["failing"]), "fact.merchant_skew": pct(mix["skew"]),
         "fact.smoke_vus": str(smoke_vus),
-        "fact.top_n": str(TOP_N), "fact.top3": top_three(fs),
+        "fact.top_n": str(TOP_N), "fact.top3": top_three(fs, runs),
         "fact.run_count": str(len(runs)),
         "fact.payments_total": f"{sum(r.result['pipeline']['payments_created'] for r in runs.values()):,}",
         "fact.java_version": java_version(),
@@ -687,7 +765,10 @@ def build_values(runs: dict) -> dict:
         "table.failover": L.failover_table(runs),
         "table.soak": L.soak_tables(runs),
         "table.gatling": L.gatling_table(runs),
-        "fact.isolation": isolation_sentence(runs, len(fs)),
+        "fact.isolation": isolation_sentence(runs),
+        "fact.measured_changes": measured_changes_phrase(runs),
+        "fact.unmeasured_note": unmeasured_note(runs),
+        "fact.compose_topology": compose_topology(),
         "fact.ablation_recommendation": ablation_recommendation(runs),
         "fact.stage_short": stage_notes(runs)["short"],
         "fact.stage_lag": stage_notes(runs)["lag"],
@@ -697,14 +778,14 @@ def build_values(runs: dict) -> dict:
         "table.stage_evidence": L.stage_evidence(runs),
         "table.gc": L.ladder_compare(runs, "tuned_steady", "tuned_steady_zgc", "G1", "ZGC"),
         "table.ablation_f11": L.ladder_compare(runs, "tuned_steady", "tuned_steady_ablate-f11", "Tuned", "Tuned without F-11"),
-        "fact.jvm_opts_tuned": L.env_value(runs, "tuned_steady", "jvm_opts"),
-        "fact.webhook_latency": L.env_value(runs, "baseline_steady", "webhook_latency_ms", "unknown").split()[0],
+        "fact.jvm_opts_tuned": tuned_jvm_opts(),
+        "fact.webhook_latency": webhook_latency_default(),
         "table.profiles": L.profile_tables(runs),
         "fact.failover_note": failover_note(runs),
         "table.extended_scope": extended_scope_table(runs),
         "fact.not_built": not_built_sentence(runs),
         "fact.known_gaps": known_gaps_sentence(runs),
-        "fact.quadrants": quadrants_sentence(fs),
+        "fact.quadrants": quadrants_sentence(fs, runs),
         "table.steady_baseline": L.steady_table(runs["baseline_steady"]),
         "table.steady_tuned": L.steady_table(runs["tuned_steady"]),
         "table.steady_comparison": L.steady_comparison(runs),
@@ -750,7 +831,26 @@ def render(template: str, values: dict) -> str:
     return out
 
 
+PDF_STAMP = os.path.join(L.ROOT, "sample-deliverable", "pdf-sources.sha256")
+PDF_SOURCES = ["AUDIT_REPORT_SAMPLE.md", "QUICK_AUDIT_ledger-service.md"]
+
+
+def pdf_source_hashes() -> str:
+    """sha256 of each report the PDFs are exported from. A PDF cannot be compared byte for byte (it embeds a
+    timestamp), so the hash of its source is stored when the PDF is exported and checked here."""
+    lines = []
+    for name in PDF_SOURCES:
+        with open(os.path.join(L.ROOT, "sample-deliverable", name), "rb") as fh:
+            lines.append(f"{hashlib.sha256(fh.read()).hexdigest()}  {name}")
+    return "\n".join(lines) + "\n"
+
+
 def main() -> int:
+    if "--stamp-pdfs" in sys.argv:
+        with open(PDF_STAMP, "w") as fh:
+            fh.write(pdf_source_hashes())
+        print(f"wrote {os.path.relpath(PDF_STAMP, L.ROOT)}")
+        return 0
     check = "--check" in sys.argv
     runs = L.load_runs()
     values = build_values(runs)
@@ -770,6 +870,12 @@ def main() -> int:
     if stale:
         print("out of date (run scripts/generate_report.py): " + ", ".join(stale), file=sys.stderr)
         return 1
+    if check:
+        current = open(PDF_STAMP).read() if os.path.exists(PDF_STAMP) else None
+        if current != pdf_source_hashes():
+            print("PDFs out of date: run node scripts/export_pdf.js sample-deliverable/*.md, then "
+                  "python3 scripts/generate_report.py --stamp-pdfs", file=sys.stderr)
+            return 1
     return 0
 
 

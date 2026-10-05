@@ -520,7 +520,8 @@ def ladder_compare(runs: dict, key_a: str, key_b: str, label_a: str, label_b: st
     """Two steady runs with the same offered rates, side by side."""
     a, b = runs.get(key_a), runs.get(key_b)
     if not a or not b:
-        return "_(the comparison run is not recorded)_"
+        return (f"_(no recorded run pairs {label_a} with {label_b}: the change was implemented after the recorded "
+                "benchmark runs, so this comparison has no data)_")
     if [p["target_req_per_s"] for p in a.phases] != [p["target_req_per_s"] for p in b.phases]:
         return "_(the two runs offered different rates, so they are not compared side by side)_"
     rows = []

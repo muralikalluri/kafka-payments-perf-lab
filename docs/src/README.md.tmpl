@@ -31,6 +31,7 @@ The same offered rates against both profiles (end-to-end = payment accepted unti
 - {{fact.earlier_spike_note}}
 - {{fact.low_load_latency}}
 - {{fact.isolation}} {{fact.stage_short}} See the limits section of the [sample audit report](sample-deliverable/AUDIT_REPORT_SAMPLE.md).
+- {{fact.unmeasured_note}}
 - Correctness held in every run: no negative balances, debits equal credits, every payment reached a terminal state ({{fact.payments_total}} payments across {{fact.run_count}} runs).
 
 ## Architecture
@@ -72,7 +73,7 @@ Results land in `results/<date>_<profile>_<scenario>/` (`result.json`, `summary.
 
 ## Features
 
-- {{fact.service_count}} services (gateway, validation, ledger and a notification service with a webhook simulator), on {{fact.kafka_topology}} in KRaft mode, Postgres with Flyway, and Redis for the tuned cache.
+- {{fact.service_count}} services (gateway, validation, ledger and a notification service with a webhook simulator), on {{fact.compose_topology}} in KRaft mode (the recorded results used {{fact.kafka_topology}}), Postgres with Flyway, and Redis for the tuned cache.
 - Profiles: `baseline` carries common real-world anti-patterns on purpose; `tuned` fixes each numbered finding behind its own flag, one commit per finding.
 - {{fact.load_scenarios}}, and a runner that resets the stack, records the environment, checks the ledger invariants and derives every figure from the database and the load tool's output.
 - Micrometer metrics, Prometheus, Kafka and Postgres exporters and one provisioned Grafana dashboard, with per-stage metric snapshots stored beside each result.

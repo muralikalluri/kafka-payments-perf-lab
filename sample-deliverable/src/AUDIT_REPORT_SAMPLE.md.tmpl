@@ -10,7 +10,7 @@
 
 **Capacity as found.** Under the stepped load, {{fact.baseline_capacity}}
 
-**After tuning.** With all {{fact.findings_count}} changes applied, {{fact.tuned_capacity}}{{fact.tuned_fail_source}} {{fact.ranges_sentence}}
+**After tuning.** With the {{fact.measured_changes}} applied, {{fact.tuned_capacity}}{{fact.tuned_fail_source}} {{fact.ranges_sentence}}
 
 **Spike behaviour.** The burst raised the offered rate from {{fact.spike_base_rate}} to {{fact.spike_burst_rate}} req/s for {{fact.spike_burst_seconds}} s. Baseline result: {{fact.spike_baseline}}. Tuned result: {{fact.spike_tuned}}. {{fact.tuned_spike_caveat}}
 
@@ -77,7 +77,7 @@ A client submits a payment with an idempotency key. The gateway records it, assi
 
 ## 5. Findings
 
-Each finding lists the evidence available, the expected impact, a recommendation, the effort (S, M or L) and the risk of making the change. Impact is **assessed** from the mechanism and the combined measurement; it was not isolated per finding.
+Each finding lists the evidence available, the expected impact, a recommendation, the effort (S, M or L) and the risk of making the change. Impact is **assessed** from the mechanism and the combined measurement; it was not isolated per finding. {{fact.unmeasured_note}}
 
 ### F-01 Producer sends synchronously, without batching or compression
 
@@ -109,7 +109,7 @@ Each finding lists the evidence available, the expected impact, a recommendation
 
 ### F-05 A blocking webhook call inside the status consumer
 
-- **Evidence.** The baseline gateway calls the client's webhook from inside the consumer that records final payment status (`BlockingWebhookNotifier`), after the status update has committed. In these runs the webhook simulator answers after about {{fact.webhook_latency}} ms, a lab parameter. `NotificationTest` shows a slow webhook delaying later status updates in the baseline but not in the tuned profile, and that a failing webhook never loses or doubles a status update in either.
+- **Evidence.** The baseline gateway calls the client's webhook from inside the consumer that records final payment status (`BlockingWebhookNotifier`), after the status update has committed. The webhook simulator answers after {{fact.webhook_latency}} ms by default, a lab parameter that no recorded run exercised. `NotificationTest` shows a slow webhook delaying later status updates in the baseline but not in the tuned profile, and that a failing webhook never loses or doubles a status update in either.
 - **Impact.** With one consumer thread the rate of status updates is capped at one over the webhook's latency, a slow webhook delays every later update, and a run of slow calls can exceed the consumer's poll interval. Notification itself is at-most-once: a crash or a failed call loses it. Assessed high because it can cap the completed-payment rate of the whole pipeline; its share of the combined result was not isolated.
 - **Recommendation.** Take the call off the status path: a notification service reads the posted events in its own consumer group, stores them, and delivers with retries, backoff and a dead state, with the receiver deduplicating by payment identifier (at-least-once delivery, effectively once).
 - **Effort / risk.** M / Medium. Clients need idempotent receivers, and dead notifications need a repair process.
@@ -151,7 +151,7 @@ Each finding lists the evidence available, the expected impact, a recommendation
 
 {{table.gc}}
 
-- **Impact.** Virtual threads make blocking calls cheap in the gateway, and a fixed heap avoids resizing pauses. Assessed as moderate and not isolated; the collector comparison is a single pair of runs.
+- **Impact.** Virtual threads make blocking calls cheap in the gateway, and a fixed heap avoids resizing pauses. Assessed as moderate and not isolated; the collector comparison, once recorded, is a single pair of runs.
 - **Recommendation.** Virtual threads for blocking request handling (watch for pinning under synchronized code), a heap sized from observed use, and a collector chosen from measurements rather than habit.
 - **Effort / risk.** S / Medium: pinning and native memory behaviour must be checked under the real workload.
 
@@ -161,7 +161,7 @@ Each finding lists the evidence available, the expected impact, a recommendation
 
 {{table.ablation_f11}}
 
-- **Impact.** One account row locked by every payment serialises them as soon as more than one consumer thread runs, so the baseline (one consumer thread) cannot show it and the tuned profile can. Assessed high once concurrency is raised; the ablation above is the evidence for its size.
+- **Impact.** One account row locked by every payment serialises them as soon as more than one consumer thread runs, so the baseline (one consumer thread) cannot show it and the tuned profile can. Assessed high once concurrency is raised; the ablation table above, once it has data, is the evidence for its size.
 - **Recommendation.** Shard hot transit accounts and choose the shard per transaction, not per payment, so a batch does not lock every shard. Add the shard to the same ordered lock set as the other accounts so no new deadlock is possible, and reconcile periodically.
 - **Trade-off.** The aggregate position must be read across shards. Because the settlement legs net out inside each transaction there is nothing to sweep; a reconciliation job records the position and warns if any shard is not at nothing.
 - **Effort / risk.** M / Medium.

@@ -345,6 +345,39 @@ class ScopeTest(unittest.TestCase):
         self.assertTrue([i for i, ok, _ in G.mvp_status(broken) if not ok])
 
 
+class MeasuredScopeTest(unittest.TestCase):
+    """The generated text must describe what the recorded runs contain, not what the repository has since gained."""
+
+    def test_measured_findings_come_from_the_recorded_tuned_config(self):
+        runs = L.load_runs()
+        measured = G.measured_findings(runs)
+        self.assertEqual(measured, sorted(measured))
+        self.assertNotIn("all 13", G.isolation_sentence(runs))
+        self.assertIn(f"{len(measured)} changes", G.isolation_sentence(runs))
+        for i in G.unmeasured_findings(runs):
+            self.assertNotIn(i, measured)
+
+    def test_unmeasured_findings_are_flagged_in_rankings(self):
+        runs = L.load_runs()
+        fs = G.findings()
+        unmeasured = G.unmeasured_findings(runs)
+        text = G.quadrants_sentence(fs, runs) + " " + G.top_three(fs, runs)
+        for i in unmeasured:
+            if i in text:
+                self.assertIn(f"{i} (not benchmarked)", text)
+
+    def test_report_has_no_filler_values(self):
+        for name in ("AUDIT_REPORT_SAMPLE.md", "README.md"):
+            path = os.path.join(L.ROOT, "sample-deliverable" if name.startswith("AUDIT") else "", name)
+            text = open(path).read()
+            for filler in ("not recorded in flight", "after about unknown", "with `unknown`", "comparison run is not recorded"):
+                self.assertNotIn(filler, text, f"{name}: {filler}")
+
+    def test_pdfs_were_exported_from_the_current_reports(self):
+        with open(G.PDF_STAMP) as fh:
+            self.assertEqual(fh.read(), G.pdf_source_hashes())
+
+
 class ReadmeTest(unittest.TestCase):
     """The global README order: pitch and badges, GIF, results, architecture, quickstart, features, design
     decisions, sample deliverable, hire-me link. Plus link integrity and the insecure-code banner."""
