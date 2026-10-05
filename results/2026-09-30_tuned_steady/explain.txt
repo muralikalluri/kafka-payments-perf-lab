@@ -1,0 +1,32 @@
+rows: gateway.payments=81001 ledger.postings=144284
+indexes on gateway.payments:
+  payments_client_key_uq
+  payments_pkey
+indexes on ledger.postings:
+  postings_account_created_idx
+  postings_pkey
+
+== F-06 idempotency lookup (gateway PaymentService.find)
+Index Scan using payments_client_key_uq on payments  (cost=0.42..8.44 rows=1 width=106) (actual time=0.031..0.032 rows=1 loops=1)
+  Index Cond: ((client_id = 'client-demo'::text) AND (idempotency_key = 'load-205-240-1790757850804'::text))
+  Buffers: shared hit=4
+Planning:
+  Buffers: shared hit=126
+Planning Time: 0.215 ms
+Execution Time: 0.046 ms
+
+== F-06 daily outflow (ledger LedgerService.outflowToday) for the busiest debtor ACC-0072
+Aggregate  (cost=361.47..361.48 rows=1 width=32) (actual time=0.344..0.344 rows=1 loops=1)
+  Buffers: shared hit=116
+  ->  Bitmap Heap Scan on postings  (cost=5.59..361.32 rows=58 width=8) (actual time=0.042..0.334 rows=120 loops=1)
+        Recheck Cond: ((account_id = 'ACC-0072'::text) AND (created_at >= date_trunc('day'::text, now())))
+        Filter: (direction = 'D'::bpchar)
+        Heap Blocks: exact=112
+        Buffers: shared hit=116
+        ->  Bitmap Index Scan on postings_account_created_idx  (cost=0.00..5.58 rows=115 width=0) (actual time=0.030..0.030 rows=120 loops=1)
+              Index Cond: ((account_id = 'ACC-0072'::text) AND (created_at >= date_trunc('day'::text, now())))
+              Buffers: shared hit=4
+Planning:
+  Buffers: shared hit=133
+Planning Time: 0.213 ms
+Execution Time: 0.367 ms
